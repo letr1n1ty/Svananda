@@ -104,7 +104,7 @@ describe('MobileApp', () => {
         sessionCalls += 1;
         return Promise.resolve(jsonResponse(sessionCalls === 1
           ? { authenticated: false, principal: null }
-          : { authenticated: true, principal: principal(['chat', 'files.read', 'files.write'], 'password') }));
+          : { authenticated: true, principal: principal(['chat', 'resources.read', 'files.read', 'files.write'], 'password') }));
       }
       if (url.includes('/api/web-auth/login')) return Promise.resolve(jsonResponse({ ok: true }));
       return Promise.resolve(jsonResponse(jsonResponseForMobile(url, options)));
@@ -147,11 +147,32 @@ describe('MobileApp', () => {
     }));
   });
 
+  it('returns stale browser sessions without resource scope to login', async () => {
+    fetchMock.mockImplementation((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes('/api/web-auth/session')) {
+        return Promise.resolve(jsonResponse({ authenticated: true, principal: principal(['chat', 'files.read', 'files.write']) }));
+      }
+      if (url.includes('/api/web-auth/logout')) {
+        return Promise.resolve(jsonResponse({ ok: true }));
+      }
+      return Promise.resolve(jsonResponse(jsonResponseForMobile(url)));
+    });
+
+    render(<MobileApp />);
+
+    expect(await screen.findByText('手机访问 Hana')).toBeInTheDocument();
+    expect(screen.getByText('当前登录缺少工作台权限，请重新输入访问密钥。')).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledWith('/api/web-auth/logout', expect.objectContaining({
+      method: 'POST',
+    }));
+  });
+
   it('loads chat sessions, desktop input surface, and workbench files for an authenticated phone', async () => {
     fetchMock.mockImplementation((input: RequestInfo | URL, options?: RequestInit) => {
       const url = String(input);
       if (url.includes('/api/web-auth/session')) {
-        return Promise.resolve(jsonResponse({ authenticated: true, principal: principal(['chat', 'files.read', 'files.write']) }));
+        return Promise.resolve(jsonResponse({ authenticated: true, principal: principal(['chat', 'resources.read', 'files.read', 'files.write']) }));
       }
       return Promise.resolve(jsonResponse(jsonResponseForMobile(url, options)));
     });
@@ -178,7 +199,7 @@ describe('MobileApp', () => {
     fetchMock.mockImplementation((input: RequestInfo | URL, options?: RequestInit) => {
       const url = String(input);
       if (url.includes('/api/web-auth/session')) {
-        return Promise.resolve(jsonResponse({ authenticated: true, principal: principal(['chat', 'files.read', 'files.write']) }));
+        return Promise.resolve(jsonResponse({ authenticated: true, principal: principal(['chat', 'resources.read', 'files.read', 'files.write']) }));
       }
       return Promise.resolve(jsonResponse(jsonResponseForMobile(url, options)));
     });
@@ -196,7 +217,7 @@ describe('MobileApp', () => {
     fetchMock.mockImplementation((input: RequestInfo | URL, options?: RequestInit) => {
       const url = String(input);
       if (url.includes('/api/web-auth/session')) {
-        return Promise.resolve(jsonResponse({ authenticated: true, principal: principal(['chat', 'files.read', 'files.write']) }));
+        return Promise.resolve(jsonResponse({ authenticated: true, principal: principal(['chat', 'resources.read', 'files.read', 'files.write']) }));
       }
       return Promise.resolve(jsonResponse(jsonResponseForMobile(url, options)));
     });

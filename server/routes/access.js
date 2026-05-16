@@ -17,7 +17,7 @@ import { isLocalOwnerPrincipal } from "../http/route-security.js";
 import { recordSecurityAuditEvent } from "../http/security-audit.js";
 import { safeJson } from "../hono-helpers.js";
 
-const DEFAULT_MOBILE_SCOPES = Object.freeze(["chat", "files.read", "files.write"]);
+const DEFAULT_MOBILE_SCOPES = Object.freeze(["chat", "resources.read", "files.read", "files.write"]);
 const ALLOWED_MOBILE_SCOPES = new Set(["chat", "resources.read", "files.read", "files.write"]);
 
 export function createAccessRoute({
@@ -278,10 +278,12 @@ function normalizeDisplayName(value, fallback) {
 
 function normalizeScopes(value) {
   const raw = Array.isArray(value) && value.length > 0 ? value : DEFAULT_MOBILE_SCOPES;
-  const scopes = raw
+  const validScopes = raw
     .filter((scope) => typeof scope === "string" && ALLOWED_MOBILE_SCOPES.has(scope));
-  if (scopes.length === 0) throw new Error("at least one supported scope is required");
-  return [...new Set(scopes)];
+  if (validScopes.length === 0) throw new Error("at least one supported scope is required");
+  const scopeSet = new Set(validScopes);
+  scopeSet.add("resources.read");
+  return DEFAULT_MOBILE_SCOPES.filter((scope) => scopeSet.has(scope));
 }
 
 function sanitizeDevice(device) {

@@ -57,6 +57,27 @@ const baseSummary = {
   credentials: [],
 };
 
+const pairedSummary = {
+  ...baseSummary,
+  devices: [{
+    deviceId: 'device_1',
+    displayName: 'User Phone',
+    deviceKind: 'mobile',
+    status: 'active',
+    trustState: 'lan',
+    lastSeenAt: '2026-05-16T03:00:00.000Z',
+  }],
+  credentials: [{
+    credentialId: 'cred_1',
+    deviceId: 'device_1',
+    status: 'active',
+    scopes: ['chat', 'resources.read', 'files.read', 'files.write'],
+    secretPrefix: 'hana_dev_abc',
+    createdAt: '2026-05-16T02:00:00.000Z',
+    lastUsedAt: '2026-05-16T03:00:00.000Z',
+  }],
+};
+
 describe('AccessTab', () => {
   beforeEach(() => {
     Object.keys(mockState).forEach(key => delete mockState[key]);
@@ -99,6 +120,15 @@ describe('AccessTab', () => {
           account: { ...baseSummary.account, passwordSet: true },
         }));
       }
+      if (url === '/api/access/account/password' && options?.method === 'DELETE') {
+        return Promise.resolve(jsonResponse({
+          ok: true,
+          account: { ...baseSummary.account, passwordSet: false },
+        }));
+      }
+      if (url === '/api/devices/credentials/cred_1/revoke' && options?.method === 'POST') {
+        return Promise.resolve(jsonResponse({ ok: true }));
+      }
       throw new Error(`unexpected request: ${url}`);
     });
     Object.assign(navigator, {
@@ -116,6 +146,9 @@ describe('AccessTab', () => {
     render(<AccessTab />);
 
     await screen.findByText('settings.access.mobileUrlLocalHint');
+    expect(screen.getByText('settings.access.status')).toBeInTheDocument();
+    expect(screen.getByText('settings.access.runtimeEndpoint')).toBeInTheDocument();
+    expect(screen.getByText('127.0.0.1:14500')).toBeInTheDocument();
     expect(screen.queryByDisplayValue('http://127.0.0.1:14500/mobile/')).not.toBeInTheDocument();
     expect(screen.getByDisplayValue('14500')).toBeInTheDocument();
 
@@ -150,7 +183,7 @@ describe('AccessTab', () => {
       method: 'POST',
       body: JSON.stringify({
         displayName: 'Mobile PWA',
-        scopes: ['chat', 'files.read', 'files.write'],
+        scopes: ['chat', 'resources.read', 'files.read', 'files.write'],
       }),
     }));
   });
@@ -185,6 +218,53 @@ describe('AccessTab', () => {
         method: 'PUT',
         body: JSON.stringify({ password: 'correct horse battery staple' }),
       }));
+    });
+  });
+
+  it('revokes individual credentials without requiring whole-device revocation', async () => {
+    mockHanaFetch.mockImplementation((url: string, options?: RequestInit) => {
+      if (url === '/api/access/summary') return Promise.resolve(jsonResponse(pairedSummary));
+      if (url === '/api/devices/credentials/cred_1/revoke' && options?.method === 'POST') {
+        return Promise.resolve(jsonResponse({ ok: true }));
+      }
+      throw new Error(`unexpected request: ${url}`);
+    });
+    const { AccessTab } = await import('../../settings/tabs/AccessTab');
+
+    render(<AccessTab />);
+
+    expect(await screen.findByText('User Phone')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'settings.access.revokeCredential' }));
+
+    await waitFor(() => {
+      expect(mockHanaFetch).toHaveBeenCalledWith('/api/devices/credentials/cred_1/revoke', { method: 'POST' });
+    });
+  });
+
+  it('clears the local password from the password section', async () => {
+    mockHanaFetch.mockImplementation((url: string, options?: RequestInit) => {
+      if (url === '/api/access/summary') {
+        return Promise.resolve(jsonResponse({
+          ...baseSummary,
+          account: { ...baseSummary.account, passwordSet: true },
+        }));
+      }
+      if (url === '/api/access/account/password' && options?.method === 'DELETE') {
+        return Promise.resolve(jsonResponse({
+          ok: true,
+          account: { ...baseSummary.account, passwordSet: false },
+        }));
+      }
+      throw new Error(`unexpected request: ${url}`);
+    });
+    const { AccessTab } = await import('../../settings/tabs/AccessTab');
+
+    render(<AccessTab />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'settings.access.clearPassword' }));
+
+    await waitFor(() => {
+      expect(mockHanaFetch).toHaveBeenCalledWith('/api/access/account/password', { method: 'DELETE' });
     });
   });
 });

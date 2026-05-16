@@ -42,12 +42,13 @@ interface AccessSummary {
     deviceId: string;
     status: string;
     scopes: string[];
+    secretPrefix?: string;
     createdAt?: string | null;
     lastUsedAt?: string | null;
   }>;
 }
 
-const DEFAULT_SCOPES = ['chat', 'files.read', 'files.write'];
+const DEFAULT_SCOPES = ['chat', 'resources.read', 'files.read', 'files.write'];
 
 export function AccessTab() {
   const showToast = useSettingsStore(s => s.showToast);
@@ -98,6 +99,16 @@ export function AccessTab() {
 
   const canCopyMobileUrl = mobileUrl.length > 0;
   const canShowQr = mode === 'lan' && mobileUrl.length > 0;
+  const runtimeEndpoint = summary ? `${summary.network.runtimeHost}:${summary.network.actualPort}` : '';
+  const effectiveMobileUrl = summary?.network.lanMobileUrl || summary?.network.localMobileUrl || '';
+  const lanAddressText = summary?.network.lanAddresses.length
+    ? summary.network.lanAddresses.join(', ')
+    : t('settings.access.noLanAddresses');
+  const activeDevices = (summary?.devices || []).filter(device => device.status === 'active');
+  const activeCredentials = (summary?.credentials || []).filter(credential => credential.status === 'active');
+  const activeCredentialDeviceIds = new Set(activeCredentials.map(credential => credential.deviceId));
+  const activeDevicesWithoutCredentials = activeDevices.filter(device => !activeCredentialDeviceIds.has(device.deviceId));
+  const deviceById = useMemo(() => new Map(activeDevices.map(device => [device.deviceId, device])), [activeDevices]);
 
   const copyText = useCallback(async (value: string) => {
     if (!value) return;
@@ -194,6 +205,18 @@ export function AccessTab() {
     }
   }, [passwordDraft, showToast]);
 
+  const clearPassword = useCallback(async () => {
+    try {
+      const res = await hanaFetch('/api/access/account/password', { method: 'DELETE' });
+      const data = await res.json();
+      setSummary(prev => prev ? { ...prev, account: data.account } : prev);
+      setPasswordDraft('');
+      showToast(t('settings.access.passwordCleared'), 'success');
+    } catch (err: any) {
+      showToast(`${t('settings.saveFailed')}: ${err.message}`, 'error');
+    }
+  }, [showToast]);
+
   const revokeDevice = useCallback(async (deviceId: string) => {
     try {
       await hanaFetch(`/api/devices/${encodeURIComponent(deviceId)}/revoke`, { method: 'POST' });
@@ -204,7 +227,15 @@ export function AccessTab() {
     }
   }, [loadSummary, showToast]);
 
-  const activeDevices = (summary?.devices || []).filter(device => device.status === 'active');
+  const revokeCredential = useCallback(async (credentialId: string) => {
+    try {
+      await hanaFetch(`/api/devices/credentials/${encodeURIComponent(credentialId)}/revoke`, { method: 'POST' });
+      await loadSummary();
+      showToast(t('settings.access.credentialRevoked'), 'success');
+    } catch (err: any) {
+      showToast(`${t('settings.access.credentialRevokeFailed')}: ${err.message}`, 'error');
+    }
+  }, [loadSummary, showToast]);
 
   return (
     <div className={`${styles['settings-tab-content']} ${styles.active}`} data-tab="access">
@@ -241,6 +272,27 @@ export function AccessTab() {
               >
                 {t('settings.access.copy')}
               </button>
+            </div>
+          }
+        />
+        <SettingsRow
+          label={t('settings.access.status')}
+          hint={summary?.network.restartRequired ? t('settings.access.restartRequired') : t('settings.access.statusHint')}
+          layout="stacked"
+          control={
+            <div className={styles['access-status-grid']}>
+              <div className={styles['access-status-item']}>
+                <span>{t('settings.access.runtimeEndpoint')}</span>
+                <strong>{runtimeEndpoint}</strong>
+              </div>
+              <div className={styles['access-status-item']}>
+                <span>{t('settings.access.effectiveMobileUrl')}</span>
+                <strong>{effectiveMobileUrl}</strong>
+              </div>
+              <div className={styles['access-status-item']}>
+                <span>{t('settings.access.lanAddresses')}</span>
+                <strong>{lanAddressText}</strong>
+              </div>
             </div>
           }
         />
@@ -287,19 +339,43 @@ export function AccessTab() {
           />
         )}
         <div className={styles['access-device-list']}>
-          {activeDevices.length === 0 ? (
+          {activeDevicesWithoutCredentials.length === 0 && activeCredentials.length === 0 ? (
             <div className={styles['access-empty']}>{t('settings.access.noDevices')}</div>
-          ) : activeDevices.map(device => (
-            <div className={styles['access-device-item']} key={device.deviceId}>
-              <div className={styles['access-device-info']}>
-                <span className={styles['access-device-name']}>{device.displayName}</span>
-                <span className={styles['access-device-meta']}>{device.deviceKind || 'device'} · {device.trustState || 'lan'}</span>
-              </div>
-              <button className={styles['settings-btn-secondary']} type="button" onClick={() => revokeDevice(device.deviceId)}>
-                {t('settings.access.revoke')}
-              </button>
-            </div>
-          ))}
+          ) : (
+            <>
+              {activeCredentials.map(credential => {
+                const device = deviceById.get(credential.deviceId);
+                return (
+                  <div className={styles['access-device-item']} key={credential.credentialId}>
+                    <div className={styles['access-device-info']}>
+                      <span className={styles['access-device-name']}>{device?.displayName || credential.deviceId}</span>
+                      <span className={styles['access-device-meta']}>
+                        {credential.secretPrefix || credential.credentialId} · {credential.scopes.join(', ')}
+                      </span>
+                    </div>
+                    <button
+                      className={styles['settings-btn-secondary']}
+                      type="button"
+                      onClick={() => revokeCredential(credential.credentialId)}
+                    >
+                      {t('settings.access.revokeCredential')}
+                    </button>
+                  </div>
+                );
+              })}
+              {activeDevicesWithoutCredentials.map(device => (
+                <div className={styles['access-device-item']} key={device.deviceId}>
+                  <div className={styles['access-device-info']}>
+                    <span className={styles['access-device-name']}>{device.displayName}</span>
+                    <span className={styles['access-device-meta']}>{device.deviceKind || 'device'} · {device.trustState || 'lan'}</span>
+                  </div>
+                  <button className={styles['settings-btn-secondary']} type="button" onClick={() => revokeDevice(device.deviceId)}>
+                    {t('settings.access.revoke')}
+                  </button>
+                </div>
+              ))}
+            </>
+          )}
         </div>
       </SettingsSection>
 
@@ -360,6 +436,11 @@ export function AccessTab() {
           }
         />
         <SettingsSection.Footer>
+          {summary?.account.passwordSet && (
+            <button className={styles['settings-btn-secondary']} type="button" onClick={clearPassword}>
+              {t('settings.access.clearPassword')}
+            </button>
+          )}
           <button className={styles['settings-btn-primary']} type="button" onClick={savePassword} disabled={!passwordDraft}>
             {t('settings.access.savePassword')}
           </button>

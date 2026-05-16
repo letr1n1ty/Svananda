@@ -1654,6 +1654,37 @@
     padding: 0.35rem;
 }
 
+.access-status-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: var(--space-sm);
+    width: 100%;
+}
+
+.access-status-item {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    padding: var(--space-sm);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-input, 4px);
+    background: var(--bg-card);
+}
+
+.access-status-item span {
+    font-size: 0.7rem;
+    color: var(--text-muted);
+}
+
+.access-status-item strong {
+    min-width: 0;
+    overflow-wrap: anywhere;
+    font-size: 0.78rem;
+    font-weight: 500;
+    color: var(--text);
+}
+
 .access-device-list {
     display: flex;
     flex-direction: column;
@@ -1705,6 +1736,12 @@
 .access-field span {
     font-size: 0.72rem;
     color: var(--text-muted);
+}
+
+@media (max-width: 720px) {
+    .access-status-grid {
+        grid-template-columns: minmax(0, 1fr);
+    }
 }
 
 /* Text input */

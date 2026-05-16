@@ -218,7 +218,7 @@ describe("access route", () => {
         trustState: "lan",
       },
       credential: {
-        scopes: ["chat", "files.read", "files.write"],
+        scopes: ["chat", "resources.read", "files.read", "files.write"],
         status: "active",
       },
     });

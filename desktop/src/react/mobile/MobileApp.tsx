@@ -19,7 +19,7 @@ import {
 
 type AuthState = 'checking' | 'login' | 'ready';
 type LoginMode = 'device' | 'password';
-const MOBILE_REQUIRED_SCOPES = Object.freeze(['chat', 'files.read', 'files.write']);
+const MOBILE_REQUIRED_SCOPES = Object.freeze(['chat', 'resources.read', 'files.read', 'files.write']);
 
 export function MobileApp(): React.ReactElement {
   const [authState, setAuthState] = useState<AuthState>('checking');
