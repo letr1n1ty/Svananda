@@ -73,6 +73,21 @@ describe('hanaFetch', () => {
     await expect(hanaFetch('/api/missing')).rejects.toThrow('404');
   });
 
+  it('允许调用方显式读取非 2xx 响应体', async () => {
+    const response = {
+      ok: false,
+      status: 400,
+      statusText: 'Bad Request',
+      json: async () => ({ error: '日记材料准备失败: simulated summary failure' }),
+    };
+    mockFetch.mockResolvedValueOnce(response);
+
+    const res = await hanaFetch('/api/diary/write', { throwOnHttpError: false });
+
+    expect(res).toBe(response);
+    expect(mockFetch.mock.calls[0][1]).not.toHaveProperty('throwOnHttpError');
+  });
+
   it('传递自定义 method 和 headers', async () => {
     mockFetch.mockResolvedValueOnce({ ok: true });
 

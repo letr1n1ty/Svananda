@@ -197,7 +197,7 @@ export async function initApp(): Promise<void> {
 
   // 19. 设置变更监听
   platform.onSettingsChanged((type: string, data: any) => {
-    handleAppEvent(type, data);
+    handleAppEvent(type, data, { source: 'desktop-ipc' });
   });
 
   // 20. 主进程请求打开设置：托盘 / 外部 IPC 统一落到主窗口 modal

@@ -261,7 +261,10 @@ export function createPreferencesRoute(engine, { platform = process.platform } =
       if (!body || typeof body !== "object") {
         return c.json({ error: "invalid JSON body" }, 400);
       }
-      const settings = engine.setComputerUseSettings(body.settings && typeof body.settings === "object" ? body.settings : body);
+      const nextSettings = body.settings && typeof body.settings === "object" ? body.settings : body;
+      const settings = typeof engine.updateComputerUseSettings === "function"
+        ? await engine.updateComputerUseSettings(nextSettings)
+        : engine.setComputerUseSettings(nextSettings);
       debugLog()?.log("api", "PUT /api/preferences/computer-use");
       emitAppEvent(engine, "computer-use-settings-changed", { selectedProviderId: selectedComputerProviderIdFromSettings(settings, platform) });
       return c.json({ ok: true, settings });

@@ -425,7 +425,7 @@ export function handleServerMessage(msg: any): void {
 
     case 'app_event':
       if (msg.event?.type) {
-        handleAppEvent(msg.event.type, msg.event.payload || {});
+        handleAppEvent(msg.event.type, msg.event.payload || {}, { source: msg.event.source || 'server' });
       }
       break;
 

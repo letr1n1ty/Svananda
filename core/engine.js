@@ -666,6 +666,22 @@ export class HanaEngine {
     if (effectiveSettings.enabled === true) this._ensureComputerRuntime();
     return effectiveSettings;
   }
+  async updateComputerUseSettings(partial) {
+    const effectiveSettings = this.setComputerUseSettings(partial);
+    if (effectiveSettings.enabled !== true) {
+      await this.disposeComputerRuntime();
+    }
+    return effectiveSettings;
+  }
+  async disposeComputerRuntime() {
+    const host = this._computerHost;
+    try {
+      await host?.dispose?.();
+    } finally {
+      this._computerHost = null;
+      this._computerProviders = null;
+    }
+  }
   approveComputerUseApp(approval) { return this._prefs.approveComputerUseApp(approval); }
   revokeComputerUseApp(approval) { return this._prefs.revokeComputerUseApp(approval); }
   resolveVisionConfig() {
@@ -1200,19 +1216,23 @@ export class HanaEngine {
   }
 
   async dispose() {
-    // 先卸载 plugins（它们可能依赖 engine 资源）
-    if (this._pluginManager) {
-      for (const p of this._pluginManager.listPlugins()) {
-        if (p.status === "loaded") {
-          await this._pluginManager.unloadPlugin(p.id);
+    try {
+      // 先卸载 plugins（它们可能依赖 engine 资源）
+      if (this._pluginManager) {
+        for (const p of this._pluginManager.listPlugins()) {
+          if (p.status === "loaded") {
+            await this._pluginManager.unloadPlugin(p.id);
+          }
         }
       }
+      this._pluginDevEventBusCleanup?.();
+      this._pluginDevEventBusCleanup = null;
+      this._skills?.unwatch();
+      await this._agentMgr.disposeAll(this._sessionCoord);
+      await this._sessionCoord.cleanupSession();
+    } finally {
+      await this.disposeComputerRuntime();
     }
-    this._pluginDevEventBusCleanup?.();
-    this._pluginDevEventBusCleanup = null;
-    this._skills?.unwatch();
-    await this._agentMgr.disposeAll(this._sessionCoord);
-    await this._sessionCoord.cleanupSession();
   }
 
   // ════════════════════════════

@@ -515,10 +515,11 @@ describe('ws-message-handler app events', () => {
       event: {
         type: 'models-changed',
         payload: { reason: 'provider' },
+        source: 'server',
       },
     });
 
-    expect(handleAppEvent).toHaveBeenCalledWith('models-changed', { reason: 'provider' });
+    expect(handleAppEvent).toHaveBeenCalledWith('models-changed', { reason: 'provider' }, { source: 'server' });
   });
 });
 
