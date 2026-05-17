@@ -46,6 +46,7 @@ import {
   resolveSessionSkillsForRuntime,
   snapshotSkillsForSession,
 } from "../lib/skills/session-skill-snapshot.js";
+import { SessionListProjectionCache } from "./session-list-projection-cache.js";
 
 const log = createModuleLogger("session");
 
@@ -332,6 +333,7 @@ export class SessionCoordinator {
     this._headlessOps = new Set();
     this._titlesCache = new Map(); // sessionDir → { titles, ts }
     this._metaCache = new Map();   // metaPath → { data, ts }
+    this._sessionListProjectionCache = deps.sessionListProjectionCache || new SessionListProjectionCache();
     this._pendingPermissionMode = null;
     this._runtimePermissionModeDefault = DEFAULT_SESSION_PERMISSION_MODE;
     this._metaWriteQueue = Promise.resolve();
@@ -1939,7 +1941,7 @@ export class SessionCoordinator {
       try { await fsp.access(sessionDir); } catch { return []; }
       try {
         const [sessions, titles, meta] = await Promise.all([
-          SessionManager.list(process.cwd(), sessionDir),
+          this._sessionListProjectionCache.list(sessionDir),
           this._loadSessionTitlesFor(sessionDir),
           this._readMetaCached(path.join(sessionDir, "session-meta.json")),
         ]);
