@@ -504,7 +504,10 @@ app.get("/api/health", async (c) => {
   }
   return c.json({
     status: "ok",
+    version: appVersion,
+    agentId: engine.currentAgentId || null,
     agent: engine.agentName,
+    agentYuan: engine.agent?.config?.agent?.yuan || "hanako",
     user: engine.userName,
     model: engine.currentModel?.name,
     avatars,
@@ -773,8 +776,8 @@ try {
   // 或杀毒扫描拖垮主启动握手。
   startBridgeManager({ autoStart: true });
 
-  // 独立运行模式：启动 CLI（TTY 环境下自动进入交互模式）
-  if (process.stdin.isTTY) {
+  // Legacy explicit attach mode. Normal headless server runs stay quiet.
+  if (process.stdin.isTTY && (process.argv.includes("--cli") || process.argv.includes("--chat"))) {
     startCLI({
       port: actualPort,
       token: SERVER_TOKEN,
