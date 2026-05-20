@@ -300,7 +300,7 @@ export class Agent {
     log(`  [agent] 8. Desk 系统...`);
     this._deskManager = createDeskManager(this.deskDir);
     this._deskManager.ensureDir();
-    this._cronStore = new CronStore(
+    this._cronStore = this._cb?.getStudioCronStore?.() || new CronStore(
       path.join(this.deskDir, "cron-jobs.json"),
       path.join(this.deskDir, "cron-runs"),
     );
@@ -309,6 +309,10 @@ export class Agent {
       confirmStore: this._cb?.getConfirmStore?.(),
       emitEvent: (event, sp) => { if (sp) this._cb?.emitEvent?.(event, sp); },
       getSessionPath: () => this._cb?.getCurrentSessionPath?.(),
+      getAgentId: () => this.id,
+      getSessionCwd: (sp) => this._cb?.getSessionCwd?.(sp),
+      getSessionWorkspaceFolders: (sp) => this._cb?.getSessionWorkspaceFolders?.(sp) || [],
+      getHomeCwd: (agentId) => this._cb?.getHomeCwd?.(agentId),
     });
     this._stageFilesTool = createStageFilesTool({
       registerSessionFile: (entry) => this._cb?.registerSessionFile?.(entry),

@@ -20,6 +20,7 @@ import { migrateToProvidersYaml } from "./migrate-providers.js";
 import { migrateProviderMediaConfig } from "./provider-media-config.js";
 import { runMigrations } from "./migrations.js";
 import { createServerRuntimeContext } from "./server-runtime-context.js";
+import { StudioCronService } from "../lib/desk/studio-cron-service.js";
 import { createRuntimeExecutionBoundary } from "./execution-boundary.js";
 import { ResourceAccessService } from "./resource-access-service.js";
 import { ResourceService } from "./resource-service.js";
@@ -153,6 +154,15 @@ export class HanaEngine {
     this.userDir = path.join(hanakoHome, "user");
     this.channelsDir = path.join(hanakoHome, "channels");
     fs.mkdirSync(this.channelsDir, { recursive: true });
+    this._studioCronService = new StudioCronService({
+      hanakoHome: this.hanakoHome,
+      agentsDir: this.agentsDir,
+      getStudioId: () => {
+        const studioId = this._runtimeContext?.studioId;
+        if (!studioId) throw new Error("runtime studioId unavailable");
+        return studioId;
+      },
+    });
     this._sessionFiles = new SessionFileRegistry({
       managedCacheRoot: path.join(hanakoHome, "session-files"),
     });
@@ -360,6 +370,7 @@ export class HanaEngine {
   /** @ui-focus-only 返回 UI 焦点 agent 的 ID */
   get currentAgentId() { return this._agentMgr.activeAgentId; }
   get confirmStore() { return this._confirmStore; }
+  getStudioCronStore() { return this._studioCronService; }
 
   /** @deprecated 工具应通过 emitEvent(event, sessionPath) 传入显式 sessionPath */
   emitSessionEvent(event) {

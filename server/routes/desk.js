@@ -16,7 +16,6 @@ import { parseSkillMetadata } from "../../lib/skills/skill-metadata.js";
 import { createSkillSourceIdentity } from "../../lib/skills/skill-file-identity.js";
 import { WORKSPACE_SKILL_DIRS } from "../../shared/workspace-skill-paths.js";
 import { t } from "../i18n.js";
-import { resolveAgent } from "../utils/resolve-agent.js";
 import { realPath, isSensitivePath } from "../utils/path-security.js";
 import { readAuthPrincipal } from "../http/capability-guard.js";
 import { isLocalOwnerPrincipal } from "../http/route-security.js";
@@ -85,6 +84,27 @@ function workspaceSkillSource(skillDir, fallbackName) {
     filePath: skillFile,
     baseDir: skillDir,
   });
+}
+
+function getStudioCronStore(engine) {
+  return engine.getStudioCronStore?.() || null;
+}
+
+function normalizeRouteExecutionContext(value, actorAgentId) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  return {
+    kind: typeof value.kind === "string" && value.kind.trim() ? value.kind.trim() : "api_request",
+    cwd: typeof value.cwd === "string" && value.cwd.trim() ? value.cwd : null,
+    workspaceFolders: Array.isArray(value.workspaceFolders)
+      ? value.workspaceFolders.filter(p => typeof p === "string" && p.trim())
+      : [],
+    sourceSessionPath: typeof value.sourceSessionPath === "string" && value.sourceSessionPath.trim()
+      ? value.sourceSessionPath
+      : null,
+    createdByAgentId: typeof value.createdByAgentId === "string" && value.createdByAgentId.trim()
+      ? value.createdByAgentId
+      : actorAgentId,
+  };
 }
 
 /** 列出工作台目录下的文件（异步） */
@@ -329,14 +349,14 @@ export function createDeskRoute(engine, hub) {
 
   /** 列出 cron 任务 */
   route.get("/desk/cron", async (c) => {
-    const store = resolveAgent(engine, c).cronStore;
+    const store = getStudioCronStore(engine);
     if (!store) return c.json({ jobs: [] });
     return c.json({ jobs: store.listJobs() });
   });
 
   /** 操作 cron 任务 */
   route.post("/desk/cron", async (c) => {
-    const store = resolveAgent(engine, c).cronStore;
+    const store = getStudioCronStore(engine);
     if (!store) return c.json({ error: "Desk not initialized" });
 
     const body = await safeJson(c);
@@ -359,7 +379,25 @@ export function createDeskRoute(engine, hub) {
           }
           params.schedule = minutes * 60_000;
         }
-        const job = store.addJob({ type, schedule: params.schedule, prompt: params.prompt, label: params.label, model: params.model });
+        const actorAgentId = typeof params.actorAgentId === "string" && params.actorAgentId.trim()
+          ? params.actorAgentId.trim()
+          : null;
+        const executionContext = normalizeRouteExecutionContext(params.executionContext, actorAgentId);
+        if (!actorAgentId || !executionContext) {
+          return c.json({ error: "actorAgentId and executionContext required" }, 400);
+        }
+        if (typeof engine.getAgent === "function" && !engine.getAgent(actorAgentId)) {
+          return c.json({ error: `agent not found: ${actorAgentId}` }, 404);
+        }
+        const job = store.addJob({
+          type,
+          schedule: params.schedule,
+          prompt: params.prompt,
+          label: params.label,
+          model: params.model,
+          actorAgentId,
+          executionContext,
+        });
         return c.json({ ok: true, job, jobs: store.listJobs() });
       }
 
