@@ -6,6 +6,31 @@ import type { ChatMessage } from './chat-types';
 
 const MAX_QUOTED_SELECTION_CHARS = 2000;
 
+let quotedSelectionLifecycle:
+  | { target: Document; cleanup: () => void }
+  | null = null;
+
+export function initQuotedSelectionLifecycle(target: Document = document): () => void {
+  if (quotedSelectionLifecycle?.target === target) {
+    return quotedSelectionLifecycle.cleanup;
+  }
+  quotedSelectionLifecycle?.cleanup();
+
+  const handleSelectionChange = () => {
+    clearSelectionIfNativeSelectionIsEmpty(target);
+  };
+  target.addEventListener('selectionchange', handleSelectionChange);
+
+  const cleanup = () => {
+    target.removeEventListener('selectionchange', handleSelectionChange);
+    if (quotedSelectionLifecycle?.target === target) {
+      quotedSelectionLifecycle = null;
+    }
+  };
+  quotedSelectionLifecycle = { target, cleanup };
+  return cleanup;
+}
+
 /**
  * 捕获 previewItem 中的文本选中。
  * CM 模式传入 cmView，DOM 模式不传。
@@ -72,7 +97,10 @@ function captureDOMSelection(previewItem: PreviewItem): void {
 export function captureChatSelection(sessionPath: string): void {
   const sel = window.getSelection();
   const text = sel?.toString().trim();
-  if (!sel || !text || sel.rangeCount === 0) return;
+  if (!sel || !text || sel.rangeCount === 0) {
+    clearSelection();
+    return;
+  }
 
   const anchorElement = nodeElement(sel.anchorNode);
   const focusElement = nodeElement(sel.focusNode);
@@ -183,4 +211,18 @@ function getCMSelectionAnchorRect(view: EditorView, from: number, to: number): F
 export function clearSelection(): void {
   const s = useStore.getState();
   if (s.quotedSelection) s.clearQuotedSelection();
+}
+
+function clearSelectionIfNativeSelectionIsEmpty(target: Document): void {
+  const sel = getNativeSelection(target);
+  const text = sel?.toString().trim();
+  if (sel && text && sel.rangeCount > 0) return;
+  clearSelection();
+}
+
+function getNativeSelection(target: Document): Selection | null {
+  if (typeof target.getSelection === 'function') {
+    return target.getSelection();
+  }
+  return target.defaultView?.getSelection?.() ?? window.getSelection();
 }

@@ -3,7 +3,7 @@
 import { EditorState } from '@codemirror/state';
 import type { EditorView } from '@codemirror/view';
 import { beforeEach, describe, expect, it } from 'vitest';
-import { captureChatSelection, captureSelection } from '../../stores/selection-actions';
+import { captureChatSelection, captureSelection, initQuotedSelectionLifecycle } from '../../stores/selection-actions';
 import { useStore } from '../../stores';
 import type { PreviewItem } from '../../types';
 
@@ -91,6 +91,49 @@ describe('captureSelection', () => {
       sourceRole: 'assistant',
       charCount: 8,
     });
+  });
+
+  it('clears an existing quote when the native window selection is canceled', () => {
+    const dispose = initQuotedSelectionLifecycle(document);
+    try {
+      useStore.setState({
+        quotedSelection: {
+          text: 'old quote',
+          sourceTitle: 'Assistant message',
+          sourceKind: 'chat',
+          sourceSessionPath: '/session/a.jsonl',
+          sourceMessageId: 'assistant-1',
+          sourceRole: 'assistant',
+          charCount: 9,
+        },
+      } as never);
+
+      window.getSelection()?.removeAllRanges();
+      document.dispatchEvent(new Event('selectionchange'));
+
+      expect(useStore.getState().quotedSelection).toBeNull();
+    } finally {
+      dispose();
+    }
+  });
+
+  it('clears an existing quote when chat capture sees an empty selection', () => {
+    useStore.setState({
+      quotedSelection: {
+        text: 'old quote',
+        sourceTitle: 'Assistant message',
+        sourceKind: 'chat',
+        sourceSessionPath: '/session/a.jsonl',
+        sourceMessageId: 'assistant-1',
+        sourceRole: 'assistant',
+        charCount: 9,
+      },
+    } as never);
+
+    window.getSelection()?.removeAllRanges();
+    captureChatSelection('/session/a.jsonl');
+
+    expect(useStore.getState().quotedSelection).toBeNull();
   });
 
   it('ignores cross-message chat selections instead of stealing ambiguous ownership', () => {
