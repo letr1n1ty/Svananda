@@ -45,10 +45,28 @@ export const markdownTheme = EditorView.theme({
     maxHeight: '720px',
     margin: '0 auto var(--space-md)',
     overflow: 'hidden',
-    backgroundColor: 'var(--bg-card)',
-    borderBottom: '1px solid var(--overlay-light)',
+    backgroundColor: 'transparent',
     userSelect: 'none',
     touchAction: 'none',
+  },
+  '.cm-markdown-cover.cm-markdown-cover-top': {
+    marginTop: 'calc(0px - var(--space-md))',
+  },
+  '.cm-markdown-cover::after': {
+    content: '""',
+    position: 'absolute',
+    inset: '0',
+    pointerEvents: 'none',
+    border: '1px solid color-mix(in srgb, var(--accent) 58%, transparent)',
+    boxShadow: [
+      'inset 0 0 0 999px color-mix(in srgb, var(--accent) 8%, transparent)',
+      'inset 0 -2px 0 color-mix(in srgb, var(--accent) 72%, transparent)',
+    ].join(', '),
+    opacity: '0',
+    transition: 'opacity var(--duration-fast) var(--ease-out)',
+  },
+  '.cm-markdown-cover.cm-markdown-cover-drop-active::after': {
+    opacity: '1',
   },
   '.cm-markdown-cover img': {
     display: 'block',

@@ -42,6 +42,7 @@ describe('markdown cover editor field', () => {
     const img = parent.querySelector('.cm-markdown-cover img');
 
     expect(cover).toBeInstanceOf(HTMLElement);
+    expect(cover?.classList.contains('cm-markdown-cover-top')).toBe(true);
     expect(cover?.style.width).toBe('72%');
     expect(cover?.style.height).toBe('280px');
     expect(parent.textContent).not.toContain('cover:');
@@ -79,9 +80,43 @@ describe('markdown cover editor field', () => {
     });
 
     expect(parent.querySelector('.cm-markdown-cover')).toBeInstanceOf(HTMLElement);
+    expect(parent.querySelector('.cm-markdown-cover')?.classList.contains('cm-markdown-cover-top')).toBe(false);
     expect(parent.textContent).toContain('title: Demo Note');
     expect(parent.textContent).toContain('tags:');
     expect(parent.textContent).not.toContain('cover:');
+
+    view.destroy();
+  });
+
+  it('lets full-width covers bleed through editor content padding', () => {
+    const parent = document.createElement('div');
+    document.body.appendChild(parent);
+    const view = new EditorView({
+      parent,
+      state: EditorState.create({
+        doc: [
+          '---',
+          'cover:',
+          '  image: 文本附件/cover.png',
+          '---',
+          '# Demo',
+        ].join('\n'),
+        extensions: [
+          markdownImageContextFacet.of({
+            filePath: '/vault/notes/day.md',
+            getFileUrl: (filePath) => `file://${filePath}`,
+          }),
+          markdownCoverField,
+        ],
+      }),
+    });
+
+    const cover = parent.querySelector('.cm-markdown-cover') as HTMLElement | null;
+
+    expect(cover?.style.width).toBe('calc(100% + var(--editor-markdown-content-padding-x) + var(--editor-markdown-content-padding-x))');
+    expect(cover?.classList.contains('cm-markdown-cover-top')).toBe(true);
+    expect(cover?.style.marginLeft).toBe('calc(0px - var(--editor-markdown-content-padding-x))');
+    expect(cover?.style.marginRight).toBe('calc(0px - var(--editor-markdown-content-padding-x))');
 
     view.destroy();
   });

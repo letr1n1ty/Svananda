@@ -43,6 +43,7 @@ class MarkdownCoverWidget extends WidgetType {
     readonly cover: MarkdownCover,
     readonly markdownFilePath?: string,
     readonly getFileUrl?: (path: string) => string | undefined,
+    readonly isTopCover = false,
   ) {
     super();
   }
@@ -53,12 +54,14 @@ class MarkdownCoverWidget extends WidgetType {
       && this.cover.displayHeight === other.cover.displayHeight
       && this.cover.positionX === other.cover.positionX
       && this.cover.positionY === other.cover.positionY
-      && this.markdownFilePath === other.markdownFilePath;
+      && this.markdownFilePath === other.markdownFilePath
+      && this.isTopCover === other.isTopCover;
   }
 
   toDOM(view: EditorView): HTMLElement {
     const wrapper = document.createElement('div');
     wrapper.className = 'cm-markdown-cover';
+    if (this.isTopCover) wrapper.classList.add('cm-markdown-cover-top');
     wrapper.contentEditable = 'false';
 
     const displayWidth = clamp(this.cover.displayWidth, 40, 100, 100);
@@ -66,7 +69,13 @@ class MarkdownCoverWidget extends WidgetType {
     const positionX = clamp(this.cover.positionX, 0, 100, 50);
     const positionY = clamp(this.cover.positionY, 0, 100, 50);
 
-    wrapper.style.width = `${displayWidth}%`;
+    if (displayWidth >= 100) {
+      wrapper.style.width = 'calc(100% + var(--editor-markdown-content-padding-x) + var(--editor-markdown-content-padding-x))';
+      wrapper.style.marginLeft = 'calc(0px - var(--editor-markdown-content-padding-x))';
+      wrapper.style.marginRight = 'calc(0px - var(--editor-markdown-content-padding-x))';
+    } else {
+      wrapper.style.width = `${displayWidth}%`;
+    }
     wrapper.style.height = `${displayHeight}px`;
 
     const src = resolveCoverImageUrl(this.cover, this.markdownFilePath, this.getFileUrl);
@@ -160,6 +169,7 @@ function buildMarkdownCoverDecorations(state: EditorState): DecorationSet {
       cover,
       imageContext.filePath || undefined,
       imageContext.getFileUrl || undefined,
+      range.from === 0,
     ),
   }));
 

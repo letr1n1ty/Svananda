@@ -2664,7 +2664,15 @@ function buildScreenshotHTML(payload) {
       margin: 0 auto;
       background: transparent;
     }
-    .screenshot-cover-frame img { width: 100%; height: 100%; object-fit: cover; display: block; }
+    .screenshot-cover-frame img {
+      width: 100%;
+      max-width: none;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+      margin: 0;
+      border-radius: 0;
+    }
     .watermark {
       display: flex; align-items: center; justify-content: center;
       gap: 0.5em; padding: 1.5em 0 1em; opacity: 0.5;
