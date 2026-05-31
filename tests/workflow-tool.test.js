@@ -169,4 +169,23 @@ describe("workflow tool", () => {
     expect(bu).toBeTruthy();
     expect(bu.taskId).toBe(res.details.taskId);
   });
+
+  it("脚本里 agent() → ActivityHub workflow_agent 子 entry（parentTaskId/label/childSessionPath）", async () => {
+    const store = makeStore();
+    const upserts = [];
+    const hub = { upsert: (e) => { upserts.push({ ...e }); return e; } };
+    const tool = createWorkflowTool({
+      executeIsolated: async (p, o) => { o.onSessionReady?.("/child.jsonl"); return { replyText: "x", error: null }; },
+      getAgentId: () => "a1", emitEvent: () => {},
+      getDeferredStore: () => store, getSubagentRunStore: () => makeRunStore(),
+      getActivityHub: () => hub,
+    });
+    const res = await tool.execute("c1", { script: META + `return await agent('x', { label: '探索' })` }, undefined, undefined, makeCtx());
+    await flush();
+    const childId = `${res.details.taskId}::node-1`;
+    const running = upserts.find((e) => e.id === childId && e.status === "running");
+    expect(running).toMatchObject({ kind: "workflow_agent", parentTaskId: res.details.taskId, sessionPath: "/s.jsonl", label: "探索" });
+    expect(upserts.find((e) => e.id === childId && e.childSessionPath === "/child.jsonl")).toBeTruthy();
+    expect(upserts.find((e) => e.id === childId && e.status === "done")).toBeTruthy();
+  });
 });

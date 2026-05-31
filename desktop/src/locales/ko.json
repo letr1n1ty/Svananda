@@ -1718,7 +1718,8 @@
     },
     "workflow": {
       "title": "Workflow",
-      "running": "실행 중 {text}"
+      "running": "실행 중 {text}",
+      "agents": "{n} 에이전트"
     },
     "session": {
       "title": "이 대화",

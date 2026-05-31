@@ -1710,7 +1710,8 @@
     },
     "workflow": {
       "title": "Workflow",
-      "running": "已運行 {text}"
+      "running": "已運行 {text}",
+      "agents": "{n} 個 agent"
     },
     "session": {
       "title": "本次對話",

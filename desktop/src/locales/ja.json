@@ -1718,7 +1718,8 @@
     },
     "workflow": {
       "title": "Workflow",
-      "running": "実行中 {text}"
+      "running": "実行中 {text}",
+      "agents": "{n} エージェント"
     },
     "session": {
       "title": "この対話",

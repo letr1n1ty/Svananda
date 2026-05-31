@@ -1718,7 +1718,8 @@
     },
     "workflow": {
       "title": "Workflow",
-      "running": "Running {text}"
+      "running": "Running {text}",
+      "agents": "{n} agents"
     },
     "session": {
       "title": "This Conversation",

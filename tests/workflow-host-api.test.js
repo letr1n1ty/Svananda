@@ -12,6 +12,7 @@ export function makeDeps(over = {}) {
     budget: over.budget || { total: null, spent: () => 0, remaining: () => Infinity },
     args: over.args,
     resolveAgentId: over.resolveAgentId,
+    onAgentEvent: over.onAgentEvent,
   };
 }
 
@@ -64,6 +65,39 @@ describe("host api - agent()", () => {
     const ac = new AbortController(); ac.abort();
     const api = createHostApi(makeDeps({ signal: ac.signal }));
     await expect(api.agent("x")).rejects.toThrow(/中止/);
+  });
+
+  it("节点级上报：agent() 发 start/session/done，带 nodeId/label/phaseLabel/agentId", async () => {
+    const evts = [];
+    const api = createHostApi(makeDeps({
+      onAgentEvent: (e) => evts.push(e),
+      resolveAgentId: (t) => (t === "Explore" ? "explore-agent" : undefined),
+      executeIsolated: async (p, o) => { o.onSessionReady?.("/child.jsonl"); return { replyText: "ok", error: null }; },
+    }));
+    api.phase("Find");
+    await api.agent("p", { label: "探索", agentType: "Explore" });
+    expect(evts.find((e) => e.phase === "start")).toMatchObject({ nodeId: "node-1", label: "探索", agentId: "explore-agent", phaseLabel: "Find" });
+    expect(evts.find((e) => e.phase === "session")).toMatchObject({ nodeId: "node-1", childSessionPath: "/child.jsonl" });
+    expect(evts.find((e) => e.phase === "done")).toMatchObject({ nodeId: "node-1" });
+  });
+
+  it("节点级上报：agent() 失败发 fail（不重复）", async () => {
+    const evts = [];
+    const api = createHostApi(makeDeps({
+      onAgentEvent: (e) => evts.push(e),
+      executeIsolated: async () => ({ replyText: "", error: "boom" }),
+    }));
+    await expect(api.agent("p")).rejects.toThrow(/boom/);
+    expect(evts.filter((e) => e.phase === "fail")).toHaveLength(1);
+    expect(evts.find((e) => e.phase === "fail")).toMatchObject({ nodeId: "node-1" });
+  });
+
+  it("节点 nodeId 递增（每次 agent() 调用分配一个）", async () => {
+    const ids = [];
+    const api = createHostApi(makeDeps({ onAgentEvent: (e) => { if (e.phase === "start") ids.push(e.nodeId); } }));
+    await api.agent("a");
+    await api.agent("b");
+    expect(ids).toEqual(["node-1", "node-2"]);
   });
 });
 

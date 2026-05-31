@@ -7,7 +7,7 @@
 
 export interface AgentActivityEntry {
   id: string;
-  kind: 'subagent' | 'workflow' | 'heartbeat' | 'cron';
+  kind: 'subagent' | 'workflow' | 'workflow_agent' | 'heartbeat' | 'cron';
   status: 'running' | 'done' | 'failed' | 'aborted';
   sessionPath: string | null;
   agentId: string | null;
@@ -16,6 +16,11 @@ export interface AgentActivityEntry {
   childSessionPath: string | null;
   startedAt: number | null;
   finishedAt: number | null;
+  // workflow_agent 子节点专属（其它 kind 缺省）：归属父 wf + 节点标签 + phase 弱分组 + token 消耗
+  parentTaskId?: string | null;
+  label?: string | null;
+  phaseLabel?: string | null;
+  tokens?: number | null;
 }
 
 export interface AgentActivitySlice {

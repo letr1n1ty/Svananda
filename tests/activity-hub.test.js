@@ -97,4 +97,24 @@ describe("ActivityHub", () => {
     hub.upsert({ ...baseEntry, id: "t2" });
     expect(seen).toEqual(["t1"]);
   });
+
+  it("workflow_agent 子节点：kind 接受 + parentTaskId/label/phaseLabel/tokens 保留，渐进 upsert", () => {
+    const hub = new ActivityHub();
+    hub.upsert({
+      id: "wf-1::node-1", kind: "workflow_agent", status: "running",
+      sessionPath: "/s/a.jsonl", parentTaskId: "wf-1", label: "探索",
+      phaseLabel: "Find", agentId: "butter", startedAt: 1000,
+    });
+    // 后补 childSessionPath + tokens（done），不带 parentTaskId/label 也应保留
+    hub.upsert({ id: "wf-1::node-1", status: "done", childSessionPath: "/s/child.jsonl", tokens: 1234, finishedAt: 2000 });
+    const e = hub.get("wf-1::node-1");
+    expect(e.kind).toBe("workflow_agent");
+    expect(e.parentTaskId).toBe("wf-1");
+    expect(e.label).toBe("探索");
+    expect(e.phaseLabel).toBe("Find");
+    expect(e.childSessionPath).toBe("/s/child.jsonl");
+    expect(e.tokens).toBe(1234);
+    expect(e.status).toBe("done");
+    expect(e.startedAt).toBe(1000);
+  });
 });

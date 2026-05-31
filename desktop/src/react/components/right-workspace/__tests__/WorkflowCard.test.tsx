@@ -3,53 +3,67 @@
  */
 import React from 'react';
 import { describe, it, expect, vi } from 'vitest';
-import { render } from '@testing-library/react';
+import { render, fireEvent } from '@testing-library/react';
 import { WorkflowCard } from '../WorkflowCard';
 
-const mockState: any = { currentSessionPath: '/s/a.jsonl', agentActivitiesBySession: {} };
+const mockState: any = { currentSessionPath: '/s/a.jsonl', agentActivitiesBySession: {}, agents: [] };
 vi.mock('../../../stores', () => ({
-  useStore: (selector: (s: any) => any) => selector(mockState),
+  useStore: Object.assign(
+    (selector: (s: any) => any) => selector(mockState),
+    { getState: () => ({ setSubagentPreviewSessionPath: vi.fn() }) },
+  ),
+}));
+vi.mock('../../chat/SubagentSessionPreview', () => ({
+  SubagentSessionPreview: () => React.createElement('div', { 'data-testid': 'preview' }),
 }));
 
-const mk = (over: any) => ({
-  id: 'x', kind: 'workflow', status: 'running', sessionPath: '/s/a.jsonl',
-  agentId: null, agentName: null, summary: 's', childSessionPath: null, startedAt: 1, finishedAt: null, ...over,
+const wf = (over: any) => ({
+  id: 'w1', kind: 'workflow', status: 'running', sessionPath: '/s/a.jsonl',
+  agentId: null, agentName: null, summary: '三行晨诗', childSessionPath: null,
+  startedAt: 1, finishedAt: null, parentTaskId: null, label: null, phaseLabel: null, tokens: null, ...over,
+});
+const node = (over: any) => ({
+  id: 'w1::node-1', kind: 'workflow_agent', status: 'running', sessionPath: '/s/a.jsonl',
+  agentId: 'butter', agentName: null, summary: null, childSessionPath: '/s/child.jsonl',
+  startedAt: 2, finishedAt: null, parentTaskId: 'w1', label: '探索', phaseLabel: null, tokens: null, ...over,
 });
 
 describe('WorkflowCard', () => {
   it('无 workflow 返回 null（subagent 不算）', () => {
-    mockState.agentActivitiesBySession = { '/s/a.jsonl': [mk({ id: 's1', kind: 'subagent' })] };
+    mockState.agentActivitiesBySession = { '/s/a.jsonl': [wf({ id: 's1', kind: 'subagent' })] };
     const { container } = render(<WorkflowCard />);
     expect(container.querySelector('.jian-card')).toBeNull();
   });
 
-  it('只渲染 workflow，running 优先', () => {
+  it('workflow 行显示 agent 数（= 子节点数），未展开不列节点', () => {
+    (window as any).t = (k: string, vars?: any) =>
+      k === 'rightWorkspace.workflow.agents' ? `${vars?.n} 个 agent` : k;
     mockState.agentActivitiesBySession = {
-      '/s/a.jsonl': [
-        mk({ id: 'w2', kind: 'workflow', status: 'done', summary: '完成的', startedAt: 1, finishedAt: 2 }),
-        mk({ id: 'w1', kind: 'workflow', status: 'running', summary: '跑着的', startedAt: 3 }),
-        mk({ id: 's1', kind: 'subagent', status: 'running', summary: 'sub-only', startedAt: 4 }),
-      ],
+      '/s/a.jsonl': [wf({ id: 'w1' }), node({ id: 'w1::node-1', label: '探索' }), node({ id: 'w1::node-2', label: '下笔' })],
     };
     const { container } = render(<WorkflowCard />);
-    const rows = container.querySelectorAll('[data-status]');
-    expect(rows).toHaveLength(2); // 只 workflow，不含 subagent
-    expect(rows[0].getAttribute('data-status')).toBe('running'); // running 优先
-    expect(container.textContent).toContain('跑着的');
-    expect(container.textContent).not.toContain('sub-only');
+    expect(container.textContent).toContain('2 个 agent'); // 计数 = 子节点数
+    expect(container.textContent).not.toContain('探索'); // 未展开不列节点
+    delete (window as any).t;
   });
 
-  it('标题走 i18n、done 显示耗时', () => {
-    (window as any).t = (k: string, vars?: any) =>
-      k === 'rightWorkspace.workflow.title' ? '工作流卡'
-      : k === 'activity.duration' ? `耗时 ${vars?.text}`
-      : k;
+  it('点开 workflow 行后列出节点（label）', () => {
     mockState.agentActivitiesBySession = {
-      '/s/a.jsonl': [mk({ id: 'w1', kind: 'workflow', status: 'done', summary: 'X', startedAt: 1000, finishedAt: 6000 })],
+      '/s/a.jsonl': [wf({ id: 'w1' }), node({ id: 'w1::node-1', label: '探索' })],
     };
     const { container } = render(<WorkflowCard />);
-    expect(container.textContent).toContain('工作流卡'); // 标题走 i18n
-    expect(container.textContent).toContain('5s'); // 6000-1000=5s 耗时
+    const wfRow = container.querySelector('[data-status]') as HTMLElement; // 第一个 = workflow 行
+    fireEvent.click(wfRow);
+    expect(container.textContent).toContain('探索'); // 节点 label 显示
+  });
+
+  it('done workflow 显示耗时', () => {
+    (window as any).t = (k: string, vars?: any) => (k === 'activity.duration' ? `耗时 ${vars?.text}` : k);
+    mockState.agentActivitiesBySession = {
+      '/s/a.jsonl': [wf({ id: 'w1', status: 'done', startedAt: 1000, finishedAt: 6000 })],
+    };
+    const { container } = render(<WorkflowCard />);
+    expect(container.textContent).toContain('5s');
     delete (window as any).t;
   });
 });
