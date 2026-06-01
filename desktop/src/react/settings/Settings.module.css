@@ -381,7 +381,8 @@
     transition: width var(--duration-slow) var(--ease-out) 0.8s;
 }
 
-.agent-cards:hover {
+.agent-cards:hover,
+.agent-cards-expanded {
     width: max(240px, calc(var(--cards-spread-width, 240) * 1px));
     transition-delay: 0s;
     /* overflow scroll for 9+ cards */
@@ -391,7 +392,8 @@
     -ms-overflow-style: none;
 }
 
-.agent-cards:hover::-webkit-scrollbar {
+.agent-cards:hover::-webkit-scrollbar,
+.agent-cards-expanded::-webkit-scrollbar {
     display: none;
 }
 
@@ -517,13 +519,15 @@
 }
 
 /* Hover 展开：直线排列（rotate 归零 + translateX 展开） */
-.agent-cards:hover .agent-card {
+.agent-cards:hover .agent-card,
+.agent-cards-expanded .agent-card {
     transform-origin: center center;
     transform: translateX(var(--tx-spread, 0px)) rotate(0deg) translateY(var(--lift, 0px));
     transition-delay: 0s;
 }
 
-.agent-cards:hover .agent-card-name {
+.agent-cards:hover .agent-card-name,
+.agent-cards-expanded .agent-card-name {
     opacity: 1;
 }
 

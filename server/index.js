@@ -126,7 +126,7 @@ function isAddressInUseError(err) {
 }
 
 function isListenPermissionError(err) {
-  return err?.code === "EACCES";
+  return err?.code === "EACCES" || err?.code === "EPERM";
 }
 
 function createPortInUseStartupError(cause, { host, port, listenHost, networkMode }) {
@@ -258,7 +258,8 @@ BrowserManager.setHanakoHome(engine.hanakoHome);
 // 注：createSession 必须在所有 Pi SDK extension factory 都注册完之后
 // (framework extension via registerExtensionFactory + plugin extension via
 //  initPlugins)。否则 ExtensionRunner 在 session 构造时只绑定当时已有的
-// factories，后注册的 extension 不会追溯挂到这个 session 上。
+// factories。运行期插件热操作后，engine.syncPluginExtensions() 会 reload
+// 已加载且空闲的 session，让 ExtensionRunner 重新绑定最新 factories。
 // 实际 createSession 调用下移到 initPlugins + registerExtensionFactory 之后。
 
 // 写日志头部
@@ -345,21 +346,34 @@ app.use("*", async (c, next) => {
     return;
   }
 
-  const authPrincipal = serverAuthService.authenticateRequest({
+  const authResult = serverAuthService.authenticateRequestDetailed({
     authorization: c.req.header("authorization"),
     queryToken: c.req.query("token"),
     cookieHeader: c.req.header("cookie"),
     allowQueryToken: true,
     connectionKind: transport.connectionKind,
   });
-  if (!authPrincipal) return c.json({ error: "forbidden" }, 403);
+  const authPrincipal = authResult.principal;
+  if (!authPrincipal) {
+    const denied = authResult.denied || {};
+    return c.json({
+      error: denied.error || "forbidden",
+      reason: denied.reason || "auth_failed",
+      ...(denied.credentialSource ? { credentialSource: denied.credentialSource } : {}),
+      connectionKind: denied.connectionKind || transport.connectionKind,
+    }, 403);
+  }
   const authz = authorizeHttpRoute({
     method: c.req.method,
     path: routePath,
     principal: authPrincipal,
   });
   if (!authz.allowed) {
-    return c.json({ error: authz.error }, authz.status);
+    return c.json({
+      error: authz.error,
+      ...(authz.reason ? { reason: authz.reason } : {}),
+      ...(authz.requiredScope ? { requiredScope: authz.requiredScope } : {}),
+    }, authz.status);
   }
   c.set("authPrincipal", authPrincipal);
 

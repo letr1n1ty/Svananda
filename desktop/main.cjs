@@ -1048,11 +1048,11 @@ function monitorServer() {
         monitorServer(); // 重新挂监控
         // 通知前端重连
         if (mainWindow && !mainWindow.isDestroyed()) {
-          mainWindow.webContents.send("server-restarted", { port: serverPort });
+          mainWindow.webContents.send("server-restarted", { port: serverPort, token: serverToken });
         }
         // 设置窗口也需要知道新端口（否则旧端口的 API 全部失败）
         if (settingsWindow && !settingsWindow.isDestroyed()) {
-          settingsWindow.webContents.send("server-restarted", { port: serverPort });
+          settingsWindow.webContents.send("server-restarted", { port: serverPort, token: serverToken });
         }
       } catch (err) {
         console.error("[desktop] Server 重启失败:", err.message);

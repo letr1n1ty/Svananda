@@ -9,7 +9,7 @@ import fs from "fs";
 import { createModuleLogger } from "../lib/debug-log.js";
 import { findModel, parseModelRef, requireModelRef } from "../shared/model-ref.js";
 import { t } from "../server/i18n.js";
-import { ensureDefaultWorkspace } from "../shared/default-workspace.js";
+import { resolveDefaultWorkspacePath } from "../shared/default-workspace.js";
 import {
   AUTO_SEARCH_PROVIDER,
   isSearchApiProvider,
@@ -122,7 +122,7 @@ export class ConfigCoordinator {
 
   /**
    * @param {string} [agentId] - 指定 agent；省略时查主 agent
-   * @returns {string} 工作目录（保证返回有效路径）
+   * @returns {string} 工作目录路径（纯解析，不创建目录）
    */
   getHomeFolder(agentId) {
     const explicit = this.getExplicitHomeFolder(agentId);
@@ -130,7 +130,7 @@ export class ConfigCoordinator {
 
     // 显式默认工作区，避免把整个桌面暴露成工作目录。
     // 不从别的 agent 继承 home_folder；跨 agent fallback 会让状态归属变成隐式焦点推导。
-    return ensureDefaultWorkspace();
+    return resolveDefaultWorkspacePath();
   }
 
   /**
