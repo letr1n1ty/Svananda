@@ -254,8 +254,10 @@ export function createChatRoute(engine, hub, { upgradeWebSocket }) {
         hasThinking: false,
         hasError: false,
         isAborted: false,
+        turnActive: false,
         titleRequested: false,
         titlePreview: "",
+        pendingDeferredContentEvents: [],
         lastAccessed: Date.now(),
         ...createSessionStreamState(),
       });
@@ -372,8 +374,50 @@ export function createChatRoute(engine, hub, { upgradeWebSocket }) {
     return entry;
   }
 
+  function buildDeferredResultContentEvents(sessionPath, event) {
+    const events = [];
+    const interlude = buildDeferredResultInterludeBlock(event, {
+      receiverName: resolveDeferredReceiverName(engine, sessionPath),
+    });
+    if (interlude) events.push({ type: "content_block", block: interlude });
+
+    if (event.status === "success") {
+      for (const block of enrichSessionFileBlocks(deferredResultFileBlocks(event.result, event.taskId), engine, sessionPath)) {
+        events.push({ type: "content_block", block });
+      }
+    } else {
+      const block = deferredResultFailureBlock(event);
+      if (block) events.push({ type: "content_block", block });
+    }
+
+    return events;
+  }
+
+  function emitDeferredContentEvents(sessionPath, ss, events) {
+    for (const deferredEvent of events) {
+      emitStreamEvent(sessionPath, ss, deferredEvent);
+    }
+  }
+
+  function queueOrEmitDeferredContentEvents(sessionPath, ss, events, { delayUntilTurnEnd = ss.isStreaming } = {}) {
+    if (!events.length) return;
+    if (delayUntilTurnEnd) {
+      ss.pendingDeferredContentEvents.push(...events);
+      return;
+    }
+    emitDeferredContentEvents(sessionPath, ss, events);
+  }
+
+  function flushPendingDeferredContentEvents(sessionPath, ss) {
+    const pending = ss.pendingDeferredContentEvents || [];
+    if (!pending.length) return;
+    ss.pendingDeferredContentEvents = [];
+    emitDeferredContentEvents(sessionPath, ss, pending);
+  }
+
   function finishStreamingState(ss) {
     if (!ss) return;
+    ss.turnActive = false;
     if (ss.isStreaming) finishSessionStream(ss);
     ss.thinkTagParser.reset();
     ss.moodParser.reset();
@@ -675,6 +719,8 @@ export function createChatRoute(engine, hub, { upgradeWebSocket }) {
     } else if (event.type === "session_status") {
       if (ss) {
         if (event.isStreaming) {
+          flushPendingDeferredContentEvents(sessionPath, ss);
+          ss.turnActive = true;
           ss.thinkTagParser.reset();
           ss.moodParser.reset();
           ss.cardParser.reset();
@@ -691,9 +737,14 @@ export function createChatRoute(engine, hub, { upgradeWebSocket }) {
           beginSessionStream(ss);
         } else if (ss.isStreaming) {
           finishStreamingState(ss);
+        } else {
+          ss.turnActive = false;
         }
       }
       broadcast({ type: "status", isStreaming: !!event.isStreaming, sessionPath });
+      if (ss && !event.isStreaming) {
+        flushPendingDeferredContentEvents(sessionPath, ss);
+      }
     } else if (event.type === "bridge_rc_attached") {
       broadcast({
         type: "bridge_rc_attached",
@@ -831,6 +882,7 @@ export function createChatRoute(engine, hub, { upgradeWebSocket }) {
 
       emitStreamEvent(sessionPath, ss, { type: "turn_end" });
       finishSessionStream(ss);
+      ss.turnActive = false;
       ss.hasOutput = false;
       ss.hasToolCall = false;
       ss.hasThinking = false;
@@ -841,11 +893,13 @@ export function createChatRoute(engine, hub, { upgradeWebSocket }) {
       ss.cardParser.reset();
       ss._cardHints = [];
       ss._cardEmitted = false;
+      flushPendingDeferredContentEvents(sessionPath, ss);
 
       debugLog()?.log("ws", `turn done (${sessionPath?.split("/").pop()})`);
       maybeGenerateFirstTurnTitle(sessionPath, ss);
     } else if (event.type === "deferred_result") {
       if (!ss) return;
+      const delayVisibleBlocks = ss.turnActive === true;
       emitStreamEvent(sessionPath, ss, {
         type: "deferred_result",
         taskId: event.taskId,
@@ -854,18 +908,12 @@ export function createChatRoute(engine, hub, { upgradeWebSocket }) {
         reason: event.reason,
         meta: event.meta,
       });
-      const interlude = buildDeferredResultInterludeBlock(event, {
-        receiverName: resolveDeferredReceiverName(engine, sessionPath),
-      });
-      if (interlude) emitStreamEvent(sessionPath, ss, { type: "content_block", block: interlude });
-      if (event.status === "success") {
-        for (const block of enrichSessionFileBlocks(deferredResultFileBlocks(event.result, event.taskId), engine, sessionPath)) {
-          emitStreamEvent(sessionPath, ss, { type: "content_block", block });
-        }
-      } else {
-        const block = deferredResultFailureBlock(event);
-        if (block) emitStreamEvent(sessionPath, ss, { type: "content_block", block });
-      }
+      queueOrEmitDeferredContentEvents(
+        sessionPath,
+        ss,
+        buildDeferredResultContentEvents(sessionPath, event),
+        { delayUntilTurnEnd: delayVisibleBlocks },
+      );
     }
   });
 

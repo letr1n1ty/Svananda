@@ -7,14 +7,14 @@
 import type {
   ChatMessage,
   ChatListItem,
-  ContentBlock,
   SessionRegistryFile,
   UserAttachment,
 } from '../stores/chat-types';
 import type { TodoItem } from '../types';
-import { parseMoodFromContent, parseCardFromContent, parseUserAttachments } from './message-parser';
+import { parseUserAttachments } from './message-parser';
 import { renderMarkdown } from './markdown';
 import { extOfName } from './file-kind';
+import { buildAssistantBlocksFromContent } from './assistant-block-builder';
 
 /* eslint-disable @typescript-eslint/no-explicit-any -- API 历史消息 JSON 结构动态，难以静态收窄 */
 
@@ -390,50 +390,13 @@ export function buildItemsFromHistory(data: HistoryApiResponse): ChatListItem[] 
       };
       items.push({ type: 'message', data: msg });
     } else if (m.role === 'assistant') {
-      const blocks: ContentBlock[] = [];
-
-      // 1. Thinking
-      if (m.thinking) {
-        blocks.push({ type: 'thinking', content: m.thinking, sealed: true });
-      }
-
-      // 2. Mood + 主文本
-      const { mood, yuan, text: afterMood } = parseMoodFromContent(m.content);
-      if (mood && yuan) {
-        blocks.push({ type: 'mood', yuan, text: mood });
-      }
-
-      // 3. Tool calls
-      if (m.toolCalls?.length) {
-        blocks.push({
-          type: 'tool_group',
-          tools: m.toolCalls.map(tc => ({
-            id: tc.id || tc.toolCallId || undefined,
-            name: tc.name,
-            args: tc.args,
-            done: true,
-            success: true,
-          })),
-          collapsed: m.toolCalls.length > 1,
-        });
-      }
-
-      // 4. 主文本（去掉 mood 和 card 后的内容）
-      const { cards, text: mainText } = parseCardFromContent(afterMood);
-      if (mainText) {
-        blocks.push({ type: 'text', html: renderMarkdown(mainText) });
-      }
-
-      // 5. Cards (before file outputs)
-      for (const card of cards) {
-        blocks.push({ type: 'plugin_card', card });
-      }
-
-      // 6. Content Blocks from unified sideband
       const msgBlocks = blockMap[i];
-      if (msgBlocks) {
-        for (const b of msgBlocks) blocks.push(b);
-      }
+      const blocks = buildAssistantBlocksFromContent({
+        content: m.content,
+        thinking: m.thinking,
+        toolCalls: m.toolCalls,
+        extraBlocks: msgBlocks,
+      });
 
       const msg: ChatMessage = { id, sourceEntryId: m.entryId, role: 'assistant', blocks };
       if (timestamp !== undefined) msg.timestamp = timestamp;

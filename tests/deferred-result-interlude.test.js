@@ -14,7 +14,8 @@ describe("deferred result interlude", () => {
       meta: {
         type: "subagent",
         executorAgentNameSnapshot: "明",
-        summary: "大纲评估",
+        label: "大纲评估",
+        summary: "请阅读整份长任务说明并输出完整评估",
       },
     }, { receiverName: "小花" });
 
@@ -26,6 +27,28 @@ describe("deferred result interlude", () => {
       text: "小花收到了来自 明 · 大纲评估 的回复",
       detailMarkdown: "整理完成",
     });
+  });
+
+  it("does not leak subagent task summaries into the interlude source label", () => {
+    const block = buildDeferredResultInterludeBlock({
+      taskId: "subagent-2",
+      status: "success",
+      result: "回来了",
+      meta: {
+        type: "subagent",
+        executorAgentNameSnapshot: "Hanako",
+        label: "凌晨诗行",
+        summary: "写一首关于凌晨五点三十九分的三行短诗。要求：不要使用常见意象。",
+      },
+    }, { receiverName: "Hanako" });
+
+    expect(block).toMatchObject({
+      sourceKind: "subagent",
+      sourceLabel: "Hanako · 凌晨诗行",
+      text: "Hanako收到了来自 Hanako · 凌晨诗行 的回复",
+    });
+    expect(block.sourceLabel).not.toContain("写一首");
+    expect(block.text).not.toContain("五点三十九分");
   });
 
   it("peels human-readable fields out of structured tool results", () => {

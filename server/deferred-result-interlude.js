@@ -160,7 +160,7 @@ function sourceKindFromType(type) {
 function resolveSource(meta = {}, type = "background-task") {
   if (type === "subagent") {
     const agentName = meta.executorAgentNameSnapshot || meta.agentName || meta.requestedAgentNameSnapshot || meta.requestedAgentName;
-    const parts = uniqueParts([agentName, meta.label, meta.summary]);
+    const parts = uniqueParts([agentName, meta.label]);
     return { kind: "subagent", label: parts.join(" · ") || TYPE_LABELS.subagent };
   }
   if (type === "workflow") {
@@ -194,6 +194,13 @@ export function buildDeferredResultInterludeBlock(event, { receiverName = "Hana"
   const type = mergedMeta.type || event.type || "background-task";
   const status = event.status === "failed" || event.status === "aborted" ? event.status : "success";
   const source = resolveSource(mergedMeta, type);
+  const previewSessionPath = typeof mergedMeta.sessionPath === "string" && mergedMeta.sessionPath.trim()
+    ? mergedMeta.sessionPath
+    : null;
+  const rawPreviewAgentId = mergedMeta.executorAgentId || mergedMeta.agentId || mergedMeta.requestedAgentId;
+  const previewAgentId = typeof rawPreviewAgentId === "string" && rawPreviewAgentId.trim()
+    ? rawPreviewAgentId.trim()
+    : null;
   const detailMarkdown = extractDeferredResultDetailMarkdown({
     status,
     result: event.result,
@@ -208,6 +215,8 @@ export function buildDeferredResultInterludeBlock(event, { receiverName = "Hana"
     status,
     sourceKind: source.kind,
     sourceLabel: source.label,
+    ...(previewSessionPath ? { previewSessionPath } : {}),
+    ...(previewAgentId ? { previewAgentId } : {}),
     text: interludeText({ receiverName, source, status }),
     detailMarkdown,
   };

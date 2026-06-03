@@ -52,6 +52,37 @@ describe('InterludeBlock', () => {
     expect(screen.getByRole('dialog')).toHaveTextContent('第一条');
   });
 
+  it('桌面端预览按正常聊天协议渲染 mood 和 markdown', () => {
+    mockMatchMedia(false);
+    render(
+      <InterludeBlock
+        block={{
+          ...block,
+          detailMarkdown: '<mood>\nVibe: 清醒\nWill: 保持克制\n</mood>\n\n**正文**\n\n> 引用',
+        }}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /小花收到了/ }));
+
+    const dialog = screen.getByRole('dialog');
+    expect(dialog).toHaveTextContent('✿ MOOD');
+    expect(dialog).toHaveTextContent('正文');
+    expect(dialog).toHaveTextContent('引用');
+    expect(dialog).not.toHaveTextContent('<mood>');
+  });
+
+  it('滚动预览浮层本身时保持打开', () => {
+    mockMatchMedia(false);
+    render(<InterludeBlock block={block} />);
+
+    fireEvent.click(screen.getByRole('button', { name: /小花收到了/ }));
+    const dialog = screen.getByRole('dialog');
+    fireEvent.scroll(dialog);
+
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+  });
+
   it('移动端不启用点击预览', () => {
     mockMatchMedia(true);
     render(<InterludeBlock block={block} />);

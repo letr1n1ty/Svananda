@@ -1023,7 +1023,8 @@ describe("sessions route", () => {
           meta: {
             type: "subagent",
             executorAgentNameSnapshot: "明",
-            summary: "大纲评估",
+            label: "大纲评估",
+            summary: "请阅读整份长任务说明并输出完整评估",
           },
         })),
       },
@@ -1045,6 +1046,7 @@ describe("sessions route", () => {
       text: "小花收到了来自 明 · 大纲评估 的回复",
       detailMarkdown: "子助手完整回复",
     });
+    expect(interlude.text).not.toContain("长任务说明");
   });
 
   it("reload 时从 runStore 回填 workflow inline 块终态（running→done + 补 finishedAt）", async () => {

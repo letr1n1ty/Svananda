@@ -1,8 +1,11 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { ContentBlock } from '../../stores/chat-types';
-import { renderMarkdown } from '../../utils/markdown';
-import { MarkdownContent } from './MarkdownContent';
+import { buildAssistantBlocksFromContent } from '../../utils/assistant-block-builder';
+import { MoodBlock } from './MoodBlock';
+import { PluginCardBlock } from './PluginCardBlock';
+import { StreamingMarkdownContent } from './StreamingMarkdownContent';
+import { SubagentSessionPreview } from './SubagentSessionPreview';
 import styles from './Chat.module.css';
 
 type InterludeContentBlock = Extract<ContentBlock, { type: 'interlude' }>;
@@ -43,8 +46,8 @@ function measurePopover(anchor: HTMLElement): FloatingPosition {
   const rect = anchor.getBoundingClientRect();
   const viewportW = window.innerWidth || document.documentElement.clientWidth || 1024;
   const viewportH = window.innerHeight || document.documentElement.clientHeight || 768;
-  const width = Math.min(Math.max(280, viewportW * 0.5), 560, Math.max(280, viewportW - 32));
-  const maxHeight = Math.min(360, Math.max(180, viewportH * 0.6));
+  const width = Math.min(Math.max(320, viewportW * 0.72), 860, Math.max(320, viewportW - 32));
+  const maxHeight = Math.min(560, Math.max(220, viewportH * 0.72));
   const left = clamp(rect.left + rect.width / 2 - width / 2, 16, viewportW - width - 16);
   const belowTop = rect.bottom + 8;
   const top = belowTop + maxHeight <= viewportH - 16
@@ -53,17 +56,55 @@ function measurePopover(anchor: HTMLElement): FloatingPosition {
   return { left, top, width, maxHeight };
 }
 
+function streamStatusFromInterlude(status: string | undefined): 'done' | 'failed' | 'aborted' {
+  if (status === 'failed') return 'failed';
+  if (status === 'aborted') return 'aborted';
+  return 'done';
+}
+
+const InterludeDetailPreview = memo(function InterludeDetailPreview({ detailMarkdown }: { detailMarkdown: string }) {
+  const blocks = useMemo(() => buildAssistantBlocksFromContent({
+    content: detailMarkdown,
+    includeTextSource: true,
+  }), [detailMarkdown]);
+
+  return (
+    <div className={styles.interludePopoverMarkdown}>
+      {blocks.map((previewBlock, index) => {
+        if (previewBlock.type === 'mood') {
+          return <MoodBlock key={`mood-${index}`} yuan={previewBlock.yuan} text={previewBlock.text} />;
+        }
+        if (previewBlock.type === 'text') {
+          return <StreamingMarkdownContent key={`text-${index}`} html={previewBlock.html} source={previewBlock.source} active={false} />;
+        }
+        if (previewBlock.type === 'plugin_card') {
+          return <PluginCardBlock key={`card-${index}`} card={previewBlock.card} />;
+        }
+        return null;
+      })}
+    </div>
+  );
+});
+
 export const InterludeBlock = memo(function InterludeBlock({ block }: { block: InterludeContentBlock }) {
   const anchorRef = useRef<HTMLButtonElement | HTMLDivElement | null>(null);
   const popoverRef = useRef<HTMLDivElement | null>(null);
+  const scrollContainerRef = useRef<HTMLDivElement | null>(null);
   const previewEnabled = useInterludePreviewEnabled();
   const detailMarkdown = (block.detailMarkdown || '').trim();
-  const canPreview = previewEnabled && detailMarkdown.length > 0;
+  const previewSessionPath = typeof block.previewSessionPath === 'string' && block.previewSessionPath.trim()
+    ? block.previewSessionPath
+    : null;
+  const canPreview = previewEnabled && (detailMarkdown.length > 0 || !!previewSessionPath);
   const [position, setPosition] = useState<FloatingPosition | null>(null);
-  const html = useMemo(() => renderMarkdown(detailMarkdown), [detailMarkdown]);
 
   const setAnchor = useCallback((node: HTMLButtonElement | HTMLDivElement | null) => {
     anchorRef.current = node;
+  }, []);
+
+  const setPopover = useCallback((node: HTMLDivElement | null) => {
+    popoverRef.current = node;
+    scrollContainerRef.current = node;
   }, []);
 
   const close = useCallback(() => setPosition(null), []);
@@ -84,15 +125,20 @@ export const InterludeBlock = memo(function InterludeBlock({ block }: { block: I
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') close();
     };
+    const handleScroll = (event: Event) => {
+      const target = event.target;
+      if (target instanceof Node && popoverRef.current?.contains(target)) return;
+      close();
+    };
     window.addEventListener('pointerdown', handlePointerDown, true);
     window.addEventListener('keydown', handleKeyDown);
     window.addEventListener('resize', close);
-    window.addEventListener('scroll', close, true);
+    window.addEventListener('scroll', handleScroll, true);
     return () => {
       window.removeEventListener('pointerdown', handlePointerDown, true);
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('resize', close);
-      window.removeEventListener('scroll', close, true);
+      window.removeEventListener('scroll', handleScroll, true);
     };
   }, [close, position]);
 
@@ -127,7 +173,7 @@ export const InterludeBlock = memo(function InterludeBlock({ block }: { block: I
       )}
       {position && createPortal(
         <div
-          ref={popoverRef}
+          ref={setPopover}
           className={styles.interludePopover}
           style={{
             left: position.left,
@@ -137,7 +183,18 @@ export const InterludeBlock = memo(function InterludeBlock({ block }: { block: I
           }}
           role="dialog"
         >
-          <MarkdownContent html={html} className={styles.interludePopoverMarkdown} />
+          {previewSessionPath && block.taskId ? (
+            <SubagentSessionPreview
+              taskId={block.taskId}
+              sessionPath={previewSessionPath}
+              agentId={block.previewAgentId || null}
+              streamStatus={streamStatusFromInterlude(block.status)}
+              summary={block.sourceLabel || null}
+              scrollContainerRef={scrollContainerRef}
+            />
+          ) : (
+            <InterludeDetailPreview detailMarkdown={detailMarkdown} />
+          )}
         </div>,
         document.body,
       )}

@@ -173,6 +173,8 @@ export type RichBlock =
     status?: 'success' | 'failed' | 'aborted' | string;
     sourceKind?: 'subagent' | 'workflow' | 'tool' | string;
     sourceLabel?: string;
+    previewSessionPath?: string;
+    previewAgentId?: string;
     text: string;
     detailMarkdown?: string;
   }
