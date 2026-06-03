@@ -93,6 +93,9 @@ export function buildSessionCacheSnapshot({
   createdAt = new Date().toISOString(),
 } = {}) {
   const normalizedModel = normalizeModel(model);
+  const requestModel = model && typeof model === "object" && !Array.isArray(model)
+    ? model
+    : normalizedModel;
   const normalizedParams = normalizeCacheKeyParams(cacheKeyParams);
   const normalizedSystemPrompt = String(systemPrompt || "");
   const normalizedTools = normalizeProviderVisibleTools(tools);
@@ -112,6 +115,7 @@ export function buildSessionCacheSnapshot({
     reason: String(reason || "unknown"),
     createdAt,
     model: normalizedModel,
+    requestModel,
     cacheKeyParams: normalizedParams,
     systemPrompt: normalizedSystemPrompt,
     tools: normalizedTools,

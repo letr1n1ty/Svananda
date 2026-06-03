@@ -28,9 +28,14 @@ const model = {
 
 describe("session cache snapshot", () => {
   it("captures model, cache params, system, active tools, and media-capable message prefix", () => {
+    const runtimeModel = {
+      ...model,
+      quirks: ["enable_thinking"],
+      cost: { input: 1, output: 2 },
+    };
     const snapshot = buildSessionCacheSnapshot({
       sessionPath: "/sessions/a.jsonl",
-      model,
+      model: runtimeModel,
       cacheKeyParams: { thinkingLevel: "high", toolChoice: "auto" },
       systemPrompt: "stable system",
       tools: [tool("read"), tool("bash")],
@@ -57,6 +62,9 @@ describe("session cache snapshot", () => {
       toolNames: ["read", "bash"],
       strict: true,
     });
+    expect(snapshot.requestModel).toEqual(runtimeModel);
+    expect(snapshot.model).not.toHaveProperty("quirks");
+    expect(snapshot.model).not.toHaveProperty("cost");
     expect(snapshot.cachePrefixHash).toMatch(/^[a-f0-9]{64}$/);
     expect(snapshot.messagePrefixHash).toMatch(/^[a-f0-9]{64}$/);
     expect(snapshot.messages[0].content[1]).toEqual({ type: "input_audio", audio_url: "file://voice.wav" });
