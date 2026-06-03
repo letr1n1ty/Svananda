@@ -2721,6 +2721,151 @@ describe("SessionCoordinator", () => {
     expect(createAgentSessionMock.mock.calls[0][0].customTools.map((tool) => tool.name)).toEqual(["jian_update_status"]);
   });
 
+  it("executeIsolated snapshots tools into session-meta for promotable activity sessions", async () => {
+    const agentDir = path.join(tempDir, "agents", "hana");
+    const activityDir = path.join(agentDir, "activity");
+    const sessionDir = path.join(agentDir, "sessions");
+    const sessionFile = path.join(activityDir, "heartbeat-session.jsonl");
+    const buildTools = vi.fn(() => ({
+      tools: [{ name: "read" }],
+      customTools: [
+        { name: "todo_write" },
+        { name: "mcp_github_search", _pluginId: "github" },
+        { name: "cron" },
+      ],
+    }));
+    const agent = {
+      id: "hana",
+      agentDir,
+      sessionDir,
+      agentName: "hana",
+      memoryMasterEnabled: true,
+      config: {
+        models: { chat: { id: "default-model", provider: "test" } },
+        desk: { patrol_tools: "*" },
+      },
+      systemPrompt: "BACKGROUND PROMPT",
+      tools: [{ name: "write" }],
+    };
+    const scopedTool = { name: "patrol_update_log", execute: vi.fn() };
+
+    sessionManagerCreateMock.mockReturnValue({
+      getCwd: () => tempDir,
+      getSessionFile: () => sessionFile,
+    });
+    createAgentSessionMock.mockResolvedValue({
+      session: {
+        sessionManager: { getSessionFile: () => sessionFile },
+        subscribe: vi.fn(() => vi.fn()),
+        prompt: vi.fn(async () => {}),
+        abort: vi.fn(),
+      },
+    });
+
+    const coordinator = new SessionCoordinator({
+      agentsDir: path.join(tempDir, "agents"),
+      getAgent: () => agent,
+      getActiveAgentId: () => "hana",
+      getModels: () => ({
+        authStorage: {},
+        modelRegistry: {},
+        defaultModel: { id: "default-model", provider: "test" },
+        availableModels: [{ id: "default-model", provider: "test" }],
+        resolveExecutionModel: (model) => model,
+        resolveThinkingLevel: () => "medium",
+      }),
+      getResourceLoader: () => ({ getSystemPrompt: () => "prompt", getAppendSystemPrompt: () => [] }),
+      getSkills: () => ({ getSkillsForAgent: () => [] }),
+      buildTools,
+      emitEvent: () => {},
+      getHomeCwd: () => tempDir,
+      agentIdFromSessionPath: (sessionPath) => sessionPath.includes(`${path.sep}sessions${path.sep}`) ? "hana" : null,
+      switchAgentOnly: async () => {},
+      getConfig: () => ({}),
+      getPrefs: () => ({ getThinkingLevel: () => "medium" }),
+      getAgents: () => new Map(),
+      getActivityStore: () => null,
+      getAgentById: () => agent,
+      ensureAgentRuntime: async () => agent,
+      listAgents: () => [],
+    });
+
+    const result = await coordinator.executeIsolated("background check", {
+      persist: activityDir,
+      activityType: "heartbeat",
+      extraCustomTools: [scopedTool],
+    });
+
+    expect(result.error).toBeNull();
+    const meta = JSON.parse(fs.readFileSync(path.join(sessionDir, "session-meta.json"), "utf-8"));
+    expect(meta["heartbeat-session.jsonl"].toolNames).toEqual([
+      "read",
+      "todo_write",
+      "mcp_github_search",
+      "patrol_update_log",
+    ]);
+  });
+
+  it("promoteActivitySession backfills missing tool snapshots for legacy activity sessions", async () => {
+    const agentDir = path.join(tempDir, "agents", "hana");
+    const activityDir = path.join(agentDir, "activity");
+    const sessionDir = path.join(agentDir, "sessions");
+    const activityFile = path.join(activityDir, "legacy-activity.jsonl");
+    fs.mkdirSync(activityDir, { recursive: true });
+    fs.mkdirSync(sessionDir, { recursive: true });
+    fs.writeFileSync(activityFile, "", "utf-8");
+
+    const agent = {
+      id: "hana",
+      agentDir,
+      sessionDir,
+      agentName: "hana",
+      memoryMasterEnabled: true,
+      experienceEnabled: true,
+      config: { models: { chat: { id: "default-model", provider: "test" } } },
+      tools: [{ name: "write" }],
+    };
+    const buildTools = vi.fn(() => ({
+      tools: [{ name: "read" }],
+      customTools: [{ name: "mcp_github_search", _pluginId: "github" }],
+    }));
+
+    const coordinator = new SessionCoordinator({
+      agentsDir: path.join(tempDir, "agents"),
+      getAgent: () => agent,
+      getActiveAgentId: () => "hana",
+      getModels: () => ({
+        authStorage: {},
+        modelRegistry: {},
+        defaultModel: { id: "default-model", provider: "test" },
+        availableModels: [{ id: "default-model", provider: "test" }],
+        resolveExecutionModel: (model) => model,
+        resolveThinkingLevel: () => "medium",
+      }),
+      getResourceLoader: () => ({ getSystemPrompt: () => "prompt", getAppendSystemPrompt: () => [] }),
+      getSkills: () => ({ getSkillsForAgent: () => [] }),
+      buildTools,
+      emitEvent: () => {},
+      getHomeCwd: () => tempDir,
+      agentIdFromSessionPath: (sessionPath) => sessionPath.includes(`${path.sep}sessions${path.sep}`) ? "hana" : null,
+      switchAgentOnly: async () => {},
+      getConfig: () => ({}),
+      getPrefs: () => ({ getThinkingLevel: () => "medium" }),
+      getAgents: () => new Map(),
+      getActivityStore: () => null,
+      getAgentById: () => agent,
+      ensureAgentRuntime: async () => agent,
+      listAgents: () => [],
+    });
+
+    const promotedPath = await coordinator.promoteActivitySession("legacy-activity.jsonl", "hana");
+
+    expect(promotedPath).toBe(path.join(sessionDir, "legacy-activity.jsonl"));
+    expect(fs.existsSync(promotedPath)).toBe(true);
+    const meta = JSON.parse(fs.readFileSync(path.join(sessionDir, "session-meta.json"), "utf-8"));
+    expect(meta["legacy-activity.jsonl"].toolNames).toEqual(["read", "mcp_github_search"]);
+  });
+
   it("executeIsolated builds sandboxed tools against the inherited execution cwd", async () => {
     const sessionFile = path.join(tempDir, "isolated-cwd-tools.jsonl");
     const buildTools = vi.fn((_cwd, customTools) => ({ tools: [], customTools }));

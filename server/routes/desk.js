@@ -698,7 +698,7 @@ export function createDeskRoute(engine, hub) {
     if (!entry) return c.json({ error: "activity not found" });
     if (!entry.sessionFile) return c.json({ error: "no session file" });
 
-    const newPath = engine.promoteActivitySession(entry.sessionFile, foundAgentId);
+    const newPath = await engine.promoteActivitySession(entry.sessionFile, foundAgentId);
     if (!newPath) return c.json({ error: "promote failed" });
 
     // 从 ActivityStore 移除已升格的条目

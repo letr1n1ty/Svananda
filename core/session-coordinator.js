@@ -71,6 +71,12 @@ const log = createModuleLogger("session");
 /** 巡检/定时任务默认工具白名单（"*" = 与 chat 一致，全部放行） */
 export const PATROL_TOOLS_DEFAULT = "*";
 
+function isPathInsideDir(parentDir, childPath) {
+  if (!parentDir || !childPath) return false;
+  const rel = path.relative(path.resolve(parentDir), path.resolve(childPath));
+  return rel === "" || (!!rel && !rel.startsWith("..") && !path.isAbsolute(rel));
+}
+
 function cacheContractDebugEnabled() {
   return process.env.HANA_CACHE_CONTRACT_DEBUG === "1";
 }
@@ -2941,6 +2947,89 @@ export class SessionCoordinator {
     return path.join(sessionDir, "session-meta.json");
   }
 
+  _isPromotableActivitySession(agent, sessionPath) {
+    return !!agent?.agentDir && isPathInsideDir(path.join(agent.agentDir, "activity"), sessionPath);
+  }
+
+  async _writePromotableActivitySessionMeta(agent, activitySessionPath, partial) {
+    if (!agent?.sessionDir || !activitySessionPath) return;
+    const promotedSessionPath = path.join(agent.sessionDir, path.basename(activitySessionPath));
+    await this.writeSessionMeta(promotedSessionPath, partial);
+  }
+
+  async _ensurePromotedActivitySessionToolMeta(agent, sessionPath) {
+    if (!agent?.sessionDir || !sessionPath) return;
+    const sessionFileName = path.basename(sessionPath);
+    const metaPath = path.join(agent.sessionDir, "session-meta.json");
+    try {
+      const meta = JSON.parse(await fsp.readFile(metaPath, "utf-8"));
+      if (Array.isArray(meta?.[sessionFileName]?.toolNames)) return;
+    } catch (err) {
+      if (err.code !== "ENOENT") {
+        log.warn(`promoteActivitySession meta read failed: ${err.message}`);
+      }
+    }
+
+    let cwd = this._d.getHomeCwd?.(agent.id) || process.cwd();
+    try {
+      const manager = SessionManager.open(sessionPath, agent.sessionDir);
+      cwd = manager?.getCwd?.() || cwd;
+    } catch (err) {
+      log.warn(`promoteActivitySession could not open session for cwd: ${err.message}`);
+    }
+
+    const models = this._d.getModels?.() || {};
+    const preferredRef = agent.config?.models?.chat;
+    let model = models.defaultModel || null;
+    if (preferredRef?.id && preferredRef?.provider && Array.isArray(models.availableModels)) {
+      model = findModel(models.availableModels, preferredRef.id, preferredRef.provider) || model;
+    }
+    let execModel = model;
+    if (model && typeof models.resolveExecutionModel === "function") {
+      execModel = models.resolveExecutionModel(model);
+    }
+    const toolsSnapshot = typeof agent.getToolsSnapshot === "function"
+      ? agent.getToolsSnapshot({
+        forceMemoryEnabled: agent.memoryMasterEnabled !== false,
+        model: execModel,
+        ...(typeof agent.experienceEnabled === "boolean"
+          ? { forceExperienceEnabled: agent.experienceEnabled === true }
+          : {}),
+      })
+      : agent.tools;
+    const workspaceScope = normalizeWorkspaceScope({ primaryCwd: cwd, workspaceFolders: [] });
+    const folderScope = normalizeSessionFolderScope({
+      primaryCwd: cwd,
+      workspaceFolders: workspaceScope.workspaceFolders,
+      authorizedFolders: [],
+    });
+    const built = this._d.buildTools?.(cwd, toolsSnapshot, {
+      agentDir: agent.agentDir,
+      workspace: cwd,
+      workspaceFolders: workspaceScope.workspaceFolders,
+      authorizedFolders: folderScope.authorizedFolders,
+      getAuthorizedFolders: () => folderScope.authorizedFolders,
+      getSessionPath: () => sessionPath,
+      fileReadSessionPaths: [],
+      getPermissionMode: () => SESSION_PERMISSION_MODES.OPERATE,
+      permissionContext: { isSubagent: false },
+    }) || { tools: [], customTools: [] };
+    const toolNames = uniqueToolNames(toolNamesFromObjects([
+      ...(built.tools || []),
+      ...(built.customTools || []),
+    ]));
+    await this.writeSessionMeta(sessionPath, {
+      memoryEnabled: agent.memoryMasterEnabled !== false,
+      experienceEnabled: agent.experienceEnabled === true,
+      workspaceFolders: workspaceScope.workspaceFolders,
+      authorizedFolders: folderScope.authorizedFolders,
+      permissionMode: SESSION_PERMISSION_MODES.OPERATE,
+      accessMode: legacyAccessModeFromPermissionMode(SESSION_PERMISSION_MODES.OPERATE),
+      planMode: false,
+      toolNames,
+    });
+  }
+
   // ── Session Context ──
 
   createSessionContext() {
@@ -2981,7 +3070,7 @@ export class SessionCoordinator {
     };
   }
 
-  promoteActivitySession(activitySessionFile, agentId) {
+  async promoteActivitySession(activitySessionFile, agentId) {
     const agent = agentId ? this._d.getAgentById(agentId) : this._d.getAgent();
     if (!agent) return null;
     const oldPath = path.join(agent.agentDir, "activity", activitySessionFile);
@@ -2991,6 +3080,11 @@ export class SessionCoordinator {
     try {
       fs.mkdirSync(agent.sessionDir, { recursive: true });
       fs.renameSync(oldPath, newPath);
+      try {
+        await this._ensurePromotedActivitySessionToolMeta(agent, newPath);
+      } catch (err) {
+        log.warn(`promoteActivitySession meta backfill failed: ${err.message}`);
+      }
       agent._memoryTicker?.notifyPromoted(newPath);
       log.log(`promoted activity session: ${activitySessionFile} (agent=${agent.id})`);
       return newPath;
@@ -3109,6 +3203,9 @@ export class SessionCoordinator {
       } else {
         tempSessionMgr = SessionManager.create(execCwd, sessionDir);
       }
+      const execPermissionMode = normalizeSessionPermissionMode({
+        permissionMode: opts.permissionMode || SESSION_PERMISSION_MODES.OPERATE,
+      });
       const targetAgentToolsSnapshot = typeof targetAgent.getToolsSnapshot === "function"
         ? targetAgent.getToolsSnapshot({
           forceMemoryEnabled: targetAgent.memoryMasterEnabled !== false,
@@ -3129,7 +3226,7 @@ export class SessionCoordinator {
           getAuthorizedFolders: () => execFolderScope.authorizedFolders,
           getSessionPath: () => tempSessionMgr?.getSessionFile?.() || null,
           fileReadSessionPaths,
-          getPermissionMode: () => opts.permissionMode || SESSION_PERMISSION_MODES.OPERATE,
+          getPermissionMode: () => execPermissionMode,
           permissionContext: { isSubagent: !!opts.subagentContext },
         },
       );
@@ -3183,6 +3280,11 @@ export class SessionCoordinator {
         execResourceLoaderProps.getSkills = { value: () => skills.getSkillsForAgent(targetAgent) };
       }
       const execResourceLoader = Object.create(resourceLoader, execResourceLoaderProps);
+      const execThinkingLevel = resolveThinkingLevelForModel(
+        this._d.getPrefs().getThinkingLevel(),
+        execModel,
+        (level) => models.resolveThinkingLevel(level),
+      );
 
       const { session } = await createAgentSession({
         cwd: execCwd,
@@ -3191,17 +3293,45 @@ export class SessionCoordinator {
         authStorage: models.authStorage,
         modelRegistry: models.modelRegistry,
         model: execModel,
-        thinkingLevel: resolveThinkingLevelForModel(
-          this._d.getPrefs().getThinkingLevel(),
-          execModel,
-          (level) => models.resolveThinkingLevel(level),
-        ),
+        thinkingLevel: execThinkingLevel,
         resourceLoader: execResourceLoader,
         tools: actTools,
         customTools: [...actCustomTools, ...extraCustomTools],
       });
 
       childSessionPath = session.sessionManager?.getSessionFile?.() || null;
+      if (!isResumedSession && childSessionPath && this._isPromotableActivitySession(targetAgent, childSessionPath)) {
+        const promotedSessionPath = path.join(targetAgent.sessionDir, path.basename(childSessionPath));
+        const isolatedSkillsResult = targetAgent !== agent && skills?.getSkillsForAgent
+          ? freezeSkillsResult(skills.getSkillsForAgent(targetAgent))
+          : freezeSkillsResult(resourceLoader.getSkills?.());
+        const promptSnapshot = {
+          version: SESSION_PROMPT_SNAPSHOT_VERSION,
+          systemPrompt: isolatedPrompt,
+          appendSystemPrompt: normalizeStringArray(execResourceLoader.getAppendSystemPrompt?.()),
+          skillsResult: freezeSkillsResult(await snapshotSkillsForSession(isolatedSkillsResult, promotedSessionPath)),
+          agentsFilesResult: freezeAgentsFilesResult(resourceLoader.getAgentsFiles?.()),
+          ...(this._getFinalSystemPrompt(session)
+            ? { finalSystemPrompt: this._getFinalSystemPrompt(session) }
+            : {}),
+        };
+        await this._writePromotableActivitySessionMeta(targetAgent, childSessionPath, {
+          memoryEnabled: targetAgent.memoryMasterEnabled !== false,
+          experienceEnabled: targetAgent.experienceEnabled === true,
+          workspaceFolders: execWorkspaceScope.workspaceFolders,
+          authorizedFolders: execFolderScope.authorizedFolders,
+          permissionMode: execPermissionMode,
+          accessMode: legacyAccessModeFromPermissionMode(execPermissionMode),
+          planMode: isReadOnlyPermissionMode(execPermissionMode),
+          thinkingLevel: execThinkingLevel,
+          promptSnapshot,
+          toolNames: uniqueToolNames(toolNamesFromObjects([
+            ...(actTools || []),
+            ...(actCustomTools || []),
+            ...(extraCustomTools || []),
+          ])),
+        });
+      }
 
       // 通知调用方 session 已就绪（subagent 用它来后补 streamKey）
       try { opts.onSessionReady?.(childSessionPath); } catch (err) { log.warn(`isolated onSessionReady callback failed: ${err?.message}`); }
