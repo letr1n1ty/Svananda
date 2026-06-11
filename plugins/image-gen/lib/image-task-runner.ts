@@ -13,6 +13,27 @@ function isObject(value) {
   return !!value && typeof value === "object" && !Array.isArray(value);
 }
 
+export function normalizeMediaDelivery(value: any = {}) {
+  const delivery = isObject(value?.delivery)
+    ? value.delivery
+    : isObject(value) && Object.prototype.hasOwnProperty.call(value, "mode")
+      ? value
+      : {};
+  const mode = typeof delivery?.mode === "string" && delivery.mode.trim()
+    ? delivery.mode.trim()
+    : typeof value?.deliveryMode === "string" && value.deliveryMode.trim()
+      ? value.deliveryMode.trim()
+      : "session";
+  return {
+    ...(isObject(delivery) ? delivery : {}),
+    mode: mode === "response" ? "response" : "session",
+  };
+}
+
+export function isResponseDelivery(value: any = {}) {
+  return normalizeMediaDelivery(value).mode === "response";
+}
+
 export function normalizeSessionPath(ctx) {
   const sessionPath = typeof ctx?.sessionPath === "string" ? ctx.sessionPath.trim() : "";
   return sessionPath || null;
@@ -317,14 +338,17 @@ export async function resolveImageAdapter(input, registry, submitCtx) {
 
 export function markSubmitFailed({ taskId, err, store, ctx }) {
   const message = errorMessage(err);
+  const task = store.get?.(taskId);
   store.update(taskId, {
     status: "failed",
     failReason: message,
     submitState: "failed",
     completedAt: new Date().toISOString(),
   });
-  ctx.bus.request("deferred:fail", { taskId, error: err }).catch(() => {});
-  ctx.bus.request("task:remove", { taskId }).catch(() => {});
+  if (!isResponseDelivery(task)) {
+    ctx.bus.request("deferred:fail", { taskId, error: err }).catch(() => {});
+    ctx.bus.request("task:remove", { taskId }).catch(() => {});
+  }
   ctx.log?.error?.(`[image-gen] submit failed for ${taskId}:`, message);
 }
 
@@ -386,7 +410,8 @@ export async function retryImageTask({ taskId, ctx }) {
   const sessionPath = typeof task.sessionPath === "string" && task.sessionPath.trim()
     ? task.sessionPath
     : null;
-  if (!sessionPath) return retryError(409, "task has no sessionPath");
+  const responseDelivery = isResponseDelivery(task);
+  if (!sessionPath && !responseDelivery) return retryError(409, "task has no sessionPath");
 
   const adapter = registry.get(task.adapterId);
   if (!adapter || typeof adapter.submit !== "function") {
@@ -407,7 +432,9 @@ export async function retryImageTask({ taskId, ctx }) {
   const deliveryTarget = task.deliveryTarget || null;
   const meta = imageDeferredMeta({ prompt, deliveryTarget });
 
-  await ctx.bus.request("deferred:retry", { taskId, sessionPath, meta });
+  if (!responseDelivery) {
+    await ctx.bus.request("deferred:retry", { taskId, sessionPath, meta });
+  }
 
   const now = new Date().toISOString();
   store.update(taskId, {
@@ -425,15 +452,17 @@ export async function retryImageTask({ taskId, ctx }) {
     retryCount: Number(task.retryCount || 0) + 1,
   });
 
-  try {
-    await ctx.bus.request("task:register", {
-      taskId,
-      type: "media-generation",
-      parentSessionPath: sessionPath,
-      meta,
-    });
-  } catch {
-    // TaskRegistry is runtime visibility only; DeferredResultStore owns delivery.
+  if (!responseDelivery) {
+    try {
+      await ctx.bus.request("task:register", {
+        taskId,
+        type: "media-generation",
+        parentSessionPath: sessionPath,
+        meta,
+      });
+    } catch {
+      // TaskRegistry is runtime visibility only; DeferredResultStore owns delivery.
+    }
   }
 
   poller.add(taskId);

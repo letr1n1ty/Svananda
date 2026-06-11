@@ -301,6 +301,53 @@ describe('plugin runtime SDK', () => {
     });
   });
 
+  it('passes response delivery media helper calls without requiring sessionPath', async () => {
+    const request = vi.fn(async (
+      _type: string,
+      _payload?: unknown,
+      _options?: Record<string, unknown>,
+    ) => ({ ok: true, tasks: [{ taskId: 'task-response' }] }));
+    const bus = {
+      request: <T = unknown>(
+        type: string,
+        payload?: unknown,
+        options?: Record<string, unknown>,
+      ) => request(type, payload, options) as Promise<T>,
+    };
+    const ctx = { pluginId: 'tavern', bus };
+
+    await generateImage(ctx, {
+      prompt: 'an icon',
+      delivery: { mode: 'response' },
+    });
+    await generateVideo(ctx, {
+      prompt: 'a motion icon',
+      delivery: { mode: 'response' },
+    });
+    await generateMedia(ctx, {
+      kind: 'image',
+      prompt: 'a generic icon',
+      delivery: { mode: 'response' },
+    });
+
+    expect(request).toHaveBeenCalledWith('media:generate-image', {
+      prompt: 'an icon',
+      delivery: { mode: 'response' },
+      pluginId: 'tavern',
+    }, undefined);
+    expect(request).toHaveBeenCalledWith('media:generate-video', {
+      prompt: 'a motion icon',
+      delivery: { mode: 'response' },
+      pluginId: 'tavern',
+    }, undefined);
+    expect(request).toHaveBeenCalledWith('media:generate', {
+      kind: 'image',
+      prompt: 'a generic icon',
+      delivery: { mode: 'response' },
+      pluginId: 'tavern',
+    }, undefined);
+  });
+
   it('wraps task bus calls with typed helper payloads', async () => {
     const request = vi.fn(async (type: string) => {
       if (type === 'task:cancel') return { result: 'aborted', canceled: true };

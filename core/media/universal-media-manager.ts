@@ -8,7 +8,11 @@ import { normalizeImageGenerationConfig } from "../preferences-manager.ts";
 import { TaskStore } from "../../plugins/image-gen/lib/task-store.ts";
 import { Poller } from "../../plugins/image-gen/lib/poller.ts";
 import { submitImageGeneration } from "../../plugins/image-gen/lib/submit-image.ts";
-import { retryImageTask } from "../../plugins/image-gen/lib/image-task-runner.ts";
+import {
+  isResponseDelivery,
+  normalizeMediaDelivery,
+  retryImageTask,
+} from "../../plugins/image-gen/lib/image-task-runner.ts";
 import { volcengineImageAdapter } from "../../plugins/image-gen/adapters/volcengine.ts";
 import { openaiImageAdapter } from "../../plugins/image-gen/adapters/openai.ts";
 import { openaiCodexImageAdapter } from "../../plugins/image-gen/adapters/openai-codex.ts";
@@ -79,7 +83,7 @@ function normalizeImageInput(input: any = {}, {
   allowRawReferences = false,
 }: any = {}) {
   const next = isObject(input) ? { ...input } : {};
-  if (Object.prototype.hasOwnProperty.call(next, "referenceImages")) {
+  if (Object.prototype.hasOwnProperty.call(next, "referenceImages") && next.referenceImages !== undefined) {
     if (!Array.isArray(next.referenceImages)) {
       throw new Error("referenceImages must be an array of session_file references");
     }
@@ -450,9 +454,12 @@ export class UniversalMediaManager {
 
   async generateImageFromBus(payload: any = {}, { allowRawReferences = false }: any = {}) {
     const sessionPath = textOrNull(payload.sessionPath);
-    if (!sessionPath) throw new Error("sessionPath is required");
-    const input = normalizeImageInput(payload.input && isObject(payload.input)
-      ? payload.input
+    const inputSource = payload.input && isObject(payload.input)
+      ? {
+        ...payload.input,
+        ...(payload.delivery !== undefined ? { delivery: payload.delivery } : {}),
+        ...(payload.deliveryMode !== undefined ? { deliveryMode: payload.deliveryMode } : {}),
+      }
       : {
         prompt: payload.prompt,
         count: payload.count,
@@ -464,7 +471,15 @@ export class UniversalMediaManager {
         model: payload.model,
         provider: payload.provider,
         suggestedFilename: payload.suggestedFilename,
-      }, {
+        delivery: payload.delivery,
+        deliveryMode: payload.deliveryMode,
+      };
+    const delivery = normalizeMediaDelivery(inputSource);
+    if (!sessionPath && !isResponseDelivery(delivery)) throw new Error("sessionPath is required");
+    const input = normalizeImageInput({
+      ...inputSource,
+      delivery,
+    }, {
         sessionPath,
         sessionFiles: this._sessionFiles,
         allowRawReferences,
@@ -485,7 +500,7 @@ export class UniversalMediaManager {
   async submitImage({ input, sessionPath, metadata = null, deliveryTarget = undefined, bridgeContext = null }: any = {}) {
     if (!this._bus || !this._poller) throw new Error(t("plugin.imageGen.notInitialized"));
     return submitImageGeneration({
-      input: normalizeImageInput(input),
+      input,
       ctx: this._toolContext({ sessionPath, bridgeContext }),
       metadata,
       deliveryTarget,
@@ -494,14 +509,24 @@ export class UniversalMediaManager {
 
   async generateVideoFromBus(payload: any = {}) {
     const sessionPath = textOrNull(payload.sessionPath);
-    if (!sessionPath) throw new Error("sessionPath is required");
-    const input = payload.input && isObject(payload.input) ? payload.input : payload;
+    const input = payload.input && isObject(payload.input)
+      ? {
+        ...payload.input,
+        ...(payload.delivery !== undefined ? { delivery: payload.delivery } : {}),
+        ...(payload.deliveryMode !== undefined ? { deliveryMode: payload.deliveryMode } : {}),
+      }
+      : payload;
+    const delivery = normalizeMediaDelivery(input);
+    if (!sessionPath && !isResponseDelivery(delivery)) throw new Error("sessionPath is required");
     return this.submitVideo({ input, sessionPath });
   }
 
   async submitVideo({ input = {}, sessionPath }: any = {}) {
     if (!this._bus || !this._poller) throw new Error(t("plugin.imageGen.notInitialized"));
     if (!textOrNull(input.prompt)) throw new Error("prompt is required");
+    const delivery = normalizeMediaDelivery(input);
+    const responseDelivery = isResponseDelivery(delivery);
+    if (!sessionPath && !responseDelivery) throw new Error("sessionPath is required");
     const adapter = input.provider
       ? this._registry.get(input.provider)
       : this._registry.getByType("video").at(-1) || null;
@@ -527,30 +552,34 @@ export class UniversalMediaManager {
       prompt: input.prompt,
       params,
       sessionPath,
+      deliveryMode: delivery.mode,
+      delivery,
     });
     if (result.files?.length) {
       this._store.update(result.taskId, { files: result.files });
     }
 
-    await this._bus.request("deferred:register", {
-      taskId: result.taskId,
-      sessionPath,
-      meta: {
-        type: "video-generation",
-        mediaKind: "video",
-        deliveryIntent: "ui_only",
-        triggerParentTurn: false,
-        prompt: input.prompt,
-      },
-    }).catch((err) => {
-      this._log.warn(`deferred:register failed for ${result.taskId}:`, err);
-    });
-    await this._bus.request("task:register", {
-      taskId: result.taskId,
-      type: "media-generation",
-      parentSessionPath: sessionPath,
-      meta: { type: "video-generation", prompt: input.prompt },
-    }).catch(() => {});
+    if (!responseDelivery) {
+      await this._bus.request("deferred:register", {
+        taskId: result.taskId,
+        sessionPath,
+        meta: {
+          type: "video-generation",
+          mediaKind: "video",
+          deliveryIntent: "ui_only",
+          triggerParentTurn: false,
+          prompt: input.prompt,
+        },
+      }).catch((err) => {
+        this._log.warn(`deferred:register failed for ${result.taskId}:`, err);
+      });
+      await this._bus.request("task:register", {
+        taskId: result.taskId,
+        type: "media-generation",
+        parentSessionPath: sessionPath,
+        meta: { type: "video-generation", prompt: input.prompt },
+      }).catch(() => {});
+    }
     this._poller.add(result.taskId);
 
     return {
@@ -558,6 +587,7 @@ export class UniversalMediaManager {
       kind: "video",
       batchId,
       prompt: input.prompt,
+      delivery,
       tasks: [{ taskId: result.taskId }],
     };
   }

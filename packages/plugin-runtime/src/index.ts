@@ -391,8 +391,14 @@ export type HanaSessionFileReference =
 
 export type HanaGenerateImageReference = HanaSessionFileReference;
 
+export interface HanaMediaDelivery {
+  mode?: 'session' | 'response' | string;
+  ttlMs?: number;
+  [key: string]: unknown;
+}
+
 export interface HanaGenerateImageInput {
-  sessionPath: string;
+  sessionPath?: string;
   prompt: string;
   count?: number;
   image?: HanaGenerateImageReference | HanaGenerateImageReference[];
@@ -404,11 +410,13 @@ export interface HanaGenerateImageInput {
   provider?: string;
   input?: Record<string, unknown>;
   metadata?: Record<string, unknown>;
+  delivery?: HanaMediaDelivery;
+  deliveryMode?: string;
   deliveryTarget?: unknown;
 }
 
 export interface HanaGenerateVideoInput {
-  sessionPath: string;
+  sessionPath?: string;
   prompt: string;
   image?: string;
   duration?: number;
@@ -417,6 +425,8 @@ export interface HanaGenerateVideoInput {
   provider?: string;
   input?: Record<string, unknown>;
   metadata?: Record<string, unknown>;
+  delivery?: HanaMediaDelivery;
+  deliveryMode?: string;
   deliveryTarget?: unknown;
 }
 
@@ -427,6 +437,8 @@ export interface HanaGenerateMediaInput {
   sessionPath?: string;
   fileId?: string;
   prompt?: string;
+  delivery?: HanaMediaDelivery;
+  deliveryMode?: string;
   input?: Record<string, unknown>;
   [key: string]: unknown;
 }

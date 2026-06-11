@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { PreferencesManager } from "../core/preferences-manager.ts";
 import { UniversalMediaManager } from "../core/media/universal-media-manager.ts";
 import { SessionFileRegistry } from "../lib/session-files/session-file-registry.ts";
@@ -59,6 +59,26 @@ function makeTempFile(root, name, content = "bytes") {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
   fs.writeFileSync(filePath, content);
   return filePath;
+}
+
+function makeBus() {
+  const handlers = new Map();
+  return {
+    handlers,
+    handle: vi.fn((type, handler) => {
+      handlers.set(type, handler);
+      return () => handlers.delete(type);
+    }),
+    subscribe: vi.fn(() => () => {}),
+    request: vi.fn(async () => ({})),
+    emit: vi.fn(),
+  };
+}
+
+async function flushBackgroundWork() {
+  await Promise.resolve();
+  await Promise.resolve();
+  await Promise.resolve();
 }
 
 describe("UniversalMediaManager image config migration", () => {
@@ -195,5 +215,132 @@ describe("UniversalMediaManager plugin image input boundary", () => {
       prompt: "draw",
       referenceImages: ["/tmp/private.png"],
     })).rejects.toThrow(/session_file/);
+  });
+
+  it("submits resolved SessionFile referenceImages to the adapter on the real image path", async () => {
+    const root = makeRoot();
+    roots.push(root);
+    const sessionFiles = new SessionFileRegistry();
+    const sessionPath = makeSessionPath(root, "real-submit-image-session.jsonl");
+    const imageA = makeTempFile(root, "refs/a.png", "png-a");
+    const imageB = makeTempFile(root, "refs/b.png", "png-b");
+    const refA = sessionFiles.registerFile({
+      sessionPath,
+      filePath: imageA,
+      origin: "user_upload",
+      storageKind: "managed_cache",
+    });
+    const refB = sessionFiles.registerFile({
+      sessionPath,
+      filePath: imageB,
+      origin: "user_upload",
+      storageKind: "managed_cache",
+    });
+    const manager = makeManager(root, makePreferences(root), { sessionFiles });
+    const bus = makeBus();
+    manager.start(bus);
+    const submit = vi.fn(async () => ({ taskId: "remote-image-task" }));
+    manager.registerAdapter({
+      id: "real-image",
+      types: ["image"],
+      submit,
+    });
+
+    await manager.generateImageFromBus({
+      sessionPath,
+      prompt: "draw from refs",
+      provider: "real-image",
+      referenceImages: [
+        { kind: "session_file", fileId: refA.id },
+        { kind: "session_file", fileId: refB.id },
+      ],
+    });
+    await flushBackgroundWork();
+
+    expect(submit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        image: [imageA, imageB],
+      }),
+      expect.anything(),
+    );
+
+    manager.stop();
+  });
+});
+
+describe("UniversalMediaManager response delivery", () => {
+  const roots: string[] = [];
+
+  afterEach(() => {
+    for (const root of roots.splice(0)) {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("submits image generation without a sessionPath when delivery mode is response", async () => {
+    const root = makeRoot();
+    roots.push(root);
+    const manager = makeManager(root, makePreferences(root));
+    const bus = makeBus();
+    manager.start(bus);
+    manager.registerAdapter({
+      id: "response-image",
+      types: ["image"],
+      submit: vi.fn(async () => ({ taskId: "remote-image-task" })),
+    });
+
+    const result = await manager.generateImageFromBus({
+      prompt: "draw without a session",
+      provider: "response-image",
+      delivery: { mode: "response" },
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      kind: "image",
+      delivery: { mode: "response" },
+    });
+    expect(manager.getTask(result.tasks[0].taskId)).toMatchObject({
+      sessionPath: null,
+      deliveryMode: "response",
+    });
+    expect(bus.request).not.toHaveBeenCalledWith("deferred:register", expect.anything());
+    expect(bus.request).not.toHaveBeenCalledWith("task:register", expect.anything());
+
+    manager.stop();
+  });
+
+  it("submits video generation without a sessionPath when delivery mode is response", async () => {
+    const root = makeRoot();
+    roots.push(root);
+    const manager = makeManager(root, makePreferences(root));
+    const bus = makeBus();
+    manager.start(bus);
+    manager.registerAdapter({
+      id: "response-video",
+      types: ["video"],
+      submit: vi.fn(async () => ({ taskId: "video-task" })),
+    });
+
+    const result = await manager.generateVideoFromBus({
+      prompt: "animate without a session",
+      provider: "response-video",
+      delivery: { mode: "response" },
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      kind: "video",
+      delivery: { mode: "response" },
+      tasks: [{ taskId: "video-task" }],
+    });
+    expect(manager.getTask("video-task")).toMatchObject({
+      sessionPath: null,
+      deliveryMode: "response",
+    });
+    expect(bus.request).not.toHaveBeenCalledWith("deferred:register", expect.anything());
+    expect(bus.request).not.toHaveBeenCalledWith("task:register", expect.anything());
+
+    manager.stop();
   });
 });
