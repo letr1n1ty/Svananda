@@ -1,0 +1,83 @@
+/* OpenCode Vercel Dark theme port for OpenHanako */
+[data-theme="opencode-vercel-dark"] {
+  /* OpenCode palette */
+  --opencode-neutral: #000000;
+  --opencode-ink: #EDEDED;
+  --opencode-primary: #0070F3;
+  --opencode-accent: #8E4EC6;
+  --opencode-success: #46A758;
+  --opencode-warning: #FFB224;
+  --opencode-error: #E5484D;
+  --opencode-info: #52A8FF;
+  --opencode-diff-add: #63C46D;
+  --opencode-diff-delete: #FF6166;
+  --opencode-text-weak: #878787;
+
+  /* Base surfaces */
+  --bg: #000000;
+  --bg-card: #0a0a0a;
+  --bg-glass: rgba(0, 0, 0, 0.92);
+  --sidebar-bg: #050505;
+
+  /* Text */
+  --text: #EDEDED;
+  --text-light: #bdbdbd;
+  --text-muted: #878787;
+  --hana-text: #EDEDED;
+
+  /* Brand / interaction */
+  --accent: #0070F3;
+  --accent-hover: #2685f4;
+  --accent-light: rgba(0, 112, 243, 0.16);
+  --accent-rgb: 0, 112, 243;
+  --link: #0070F3;
+
+  /* Secondary accent */
+  --coral: #8E4EC6;
+  --coral-rgb: 142, 78, 198;
+
+  /* State colors */
+  --green: #46A758;
+  --green-rgb: 70, 167, 88;
+  --danger: #E5484D;
+  --danger-rgb: 229, 72, 77;
+
+  /* Borders / shadows */
+  --border: rgba(237, 237, 237, 0.14);
+  --shadow: 0 18px 40px rgba(0, 0, 0, 0.45);
+
+  /* Common overlays */
+  --overlay-subtle: rgba(237, 237, 237, 0.04);
+  --overlay-light: rgba(237, 237, 237, 0.08);
+  --overlay-medium: rgba(237, 237, 237, 0.14);
+  --overlay-strong: rgba(237, 237, 237, 0.22);
+
+  /* Chat bubbles / notes */
+  --user-bg: rgba(0, 112, 243, 0.14);
+  --jian-note-bg: rgba(142, 78, 198, 0.12);
+  --jian-note-border: rgba(142, 78, 198, 0.28);
+
+  /* Mood / tool chips */
+  --mood-bg: rgba(82, 168, 255, 0.12);
+  --mood-text: #52A8FF;
+  --mood-border: rgba(82, 168, 255, 0.28);
+
+  --tool-bg: rgba(0, 112, 243, 0.12);
+  --tool-text: #0070F3;
+
+  /* Attach / drag-drop */
+  --drop-overlay-bg: rgba(0, 0, 0, 0.72);
+  --attach-bg: rgba(237, 237, 237, 0.06);
+
+  /* Permission / warnings */
+  --permission-auto: #FFB224;
+  --permission-request: #0070F3;
+
+  /* Tabs */
+  --tab-slider-bg: rgba(0, 112, 243, 0.22);
+  --tab-slider-shadow: 0 8px 18px rgba(0, 112, 243, 0.18);
+
+  --select-arrow: none;
+
+  color-scheme: dark;
+}

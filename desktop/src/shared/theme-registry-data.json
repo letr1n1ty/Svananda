@@ -8,7 +8,43 @@
   },
   "paperTextureBlockedThemeIds": [
     "midnight",
-    "midnight-contrast"
+    "midnight-contrast",
+    "opencode-dark",
+    "opencode-ayu-dark",
+    "opencode-cursor-dark",
+    "opencode-amoled-dark",
+    "opencode-vercel-dark",
+    "opencode-kanagawa-dark",
+    "opencode-catppuccin-dark",
+    "opencode-carbonfox-dark",
+    "opencode-cobalt2-dark",
+    "opencode-dracula-dark",
+    "opencode-aura-dark",
+    "opencode-gruvbox-dark",
+    "opencode-shadesofpurple-dark",
+    "opencode-monokai-dark",
+    "opencode-nord-dark",
+    "opencode-nightowl-dark",
+    "opencode-zenburn-dark",
+    "opencode-matrix-dark",
+    "opencode-tokyonight-dark",
+    "opencode-everforest-dark",
+    "opencode-vesper-dark",
+    "opencode-onedarkpro-dark",
+    "opencode-solarized-dark",
+    "opencode-one-dark-dark",
+    "opencode-synthwave84-dark",
+    "opencode-osaka-jade-dark",
+    "opencode-palenight-dark",
+    "opencode-rosepine-dark",
+    "opencode-orng-dark",
+    "opencode-catppuccin-macchiato-dark",
+    "opencode-mercury-dark",
+    "opencode-lucent-orng-dark",
+    "opencode-catppuccin-frappe-dark",
+    "opencode-flexoki-dark",
+    "opencode-github-dark",
+    "opencode-material-dark"
   ],
   "autoOption": {
     "id": "auto",
@@ -75,6 +111,438 @@
       "backgroundColor": "#26343D",
       "i18nName": "settings.appearance.midnightContrast",
       "i18nMode": "settings.appearance.midnightContrastMode"
+    },
+    "opencode-dark": {
+      "cssPath": "themes/opencode-dark.css",
+      "backgroundColor": "#0A0A0A",
+      "i18nName": "settings.appearance.opencodeDark",
+      "i18nMode": "settings.appearance.opencodeDarkMode"
+    },
+    "opencode-light": {
+      "cssPath": "themes/opencode-light.css",
+      "backgroundColor": "#FFFFFF",
+      "i18nName": "settings.appearance.opencodeLight",
+      "i18nMode": "settings.appearance.opencodeLightMode"
+    },
+    "opencode-ayu-light": {
+      "cssPath": "themes/opencode-ayu-light.css",
+      "backgroundColor": "#FDFAF4",
+      "i18nName": "settings.appearance.opencodeAyuLight",
+      "i18nMode": "settings.appearance.opencodeAyuLightMode"
+    },
+    "opencode-ayu-dark": {
+      "cssPath": "themes/opencode-ayu-dark.css",
+      "backgroundColor": "#0F1419",
+      "i18nName": "settings.appearance.opencodeAyuDark",
+      "i18nMode": "settings.appearance.opencodeAyuDarkMode"
+    },
+    "opencode-cursor-light": {
+      "cssPath": "themes/opencode-cursor-light.css",
+      "backgroundColor": "#FCFCFC",
+      "i18nName": "settings.appearance.opencodeCursorLight",
+      "i18nMode": "settings.appearance.opencodeCursorLightMode"
+    },
+    "opencode-cursor-dark": {
+      "cssPath": "themes/opencode-cursor-dark.css",
+      "backgroundColor": "#181818",
+      "i18nName": "settings.appearance.opencodeCursorDark",
+      "i18nMode": "settings.appearance.opencodeCursorDarkMode"
+    },
+    "opencode-amoled-light": {
+      "cssPath": "themes/opencode-amoled-light.css",
+      "backgroundColor": "#F0F0F0",
+      "i18nName": "settings.appearance.opencodeAmoledLight",
+      "i18nMode": "settings.appearance.opencodeAmoledLightMode"
+    },
+    "opencode-amoled-dark": {
+      "cssPath": "themes/opencode-amoled-dark.css",
+      "backgroundColor": "#000000",
+      "i18nName": "settings.appearance.opencodeAmoledDark",
+      "i18nMode": "settings.appearance.opencodeAmoledDarkMode"
+    },
+    "opencode-vercel-light": {
+      "cssPath": "themes/opencode-vercel-light.css",
+      "backgroundColor": "#FFFFFF",
+      "i18nName": "settings.appearance.opencodeVercelLight",
+      "i18nMode": "settings.appearance.opencodeVercelLightMode"
+    },
+    "opencode-vercel-dark": {
+      "cssPath": "themes/opencode-vercel-dark.css",
+      "backgroundColor": "#000000",
+      "i18nName": "settings.appearance.opencodeVercelDark",
+      "i18nMode": "settings.appearance.opencodeVercelDarkMode"
+    },
+    "opencode-kanagawa-light": {
+      "cssPath": "themes/opencode-kanagawa-light.css",
+      "backgroundColor": "#F2E9DE",
+      "i18nName": "settings.appearance.opencodeKanagawaLight",
+      "i18nMode": "settings.appearance.opencodeKanagawaLightMode"
+    },
+    "opencode-kanagawa-dark": {
+      "cssPath": "themes/opencode-kanagawa-dark.css",
+      "backgroundColor": "#1F1F28",
+      "i18nName": "settings.appearance.opencodeKanagawaDark",
+      "i18nMode": "settings.appearance.opencodeKanagawaDarkMode"
+    },
+    "opencode-catppuccin-light": {
+      "cssPath": "themes/opencode-catppuccin-light.css",
+      "backgroundColor": "#F5E0DC",
+      "i18nName": "settings.appearance.opencodeCatppuccinLight",
+      "i18nMode": "settings.appearance.opencodeCatppuccinLightMode"
+    },
+    "opencode-catppuccin-dark": {
+      "cssPath": "themes/opencode-catppuccin-dark.css",
+      "backgroundColor": "#1E1E2E",
+      "i18nName": "settings.appearance.opencodeCatppuccinDark",
+      "i18nMode": "settings.appearance.opencodeCatppuccinDarkMode"
+    },
+    "opencode-carbonfox-light": {
+      "cssPath": "themes/opencode-carbonfox-light.css",
+      "backgroundColor": "#8E8E8E",
+      "i18nName": "settings.appearance.opencodeCarbonfoxLight",
+      "i18nMode": "settings.appearance.opencodeCarbonfoxLightMode"
+    },
+    "opencode-carbonfox-dark": {
+      "cssPath": "themes/opencode-carbonfox-dark.css",
+      "backgroundColor": "#393939",
+      "i18nName": "settings.appearance.opencodeCarbonfoxDark",
+      "i18nMode": "settings.appearance.opencodeCarbonfoxDarkMode"
+    },
+    "opencode-cobalt2-dark": {
+      "cssPath": "themes/opencode-cobalt2-dark.css",
+      "backgroundColor": "#193549",
+      "i18nName": "settings.appearance.opencodeCobalt2Dark",
+      "i18nMode": "settings.appearance.opencodeCobalt2DarkMode"
+    },
+    "opencode-dracula-light": {
+      "cssPath": "themes/opencode-dracula-light.css",
+      "backgroundColor": "#F8F8F2",
+      "i18nName": "settings.appearance.opencodeDraculaLight",
+      "i18nMode": "settings.appearance.opencodeDraculaLightMode"
+    },
+    "opencode-dracula-dark": {
+      "cssPath": "themes/opencode-dracula-dark.css",
+      "backgroundColor": "#1D1E28",
+      "i18nName": "settings.appearance.opencodeDraculaDark",
+      "i18nMode": "settings.appearance.opencodeDraculaDarkMode"
+    },
+    "opencode-aura-light": {
+      "cssPath": "themes/opencode-aura-light.css",
+      "backgroundColor": "#F5F0FF",
+      "i18nName": "settings.appearance.opencodeAuraLight",
+      "i18nMode": "settings.appearance.opencodeAuraLightMode"
+    },
+    "opencode-aura-dark": {
+      "cssPath": "themes/opencode-aura-dark.css",
+      "backgroundColor": "#15141B",
+      "i18nName": "settings.appearance.opencodeAuraDark",
+      "i18nMode": "settings.appearance.opencodeAuraDarkMode"
+    },
+    "opencode-gruvbox-light": {
+      "cssPath": "themes/opencode-gruvbox-light.css",
+      "backgroundColor": "#FBF1C7",
+      "i18nName": "settings.appearance.opencodeGruvboxLight",
+      "i18nMode": "settings.appearance.opencodeGruvboxLightMode"
+    },
+    "opencode-gruvbox-dark": {
+      "cssPath": "themes/opencode-gruvbox-dark.css",
+      "backgroundColor": "#282828",
+      "i18nName": "settings.appearance.opencodeGruvboxDark",
+      "i18nMode": "settings.appearance.opencodeGruvboxDarkMode"
+    },
+    "opencode-shadesofpurple-light": {
+      "cssPath": "themes/opencode-shadesofpurple-light.css",
+      "backgroundColor": "#F7EBFF",
+      "i18nName": "settings.appearance.opencodeShadesofpurpleLight",
+      "i18nMode": "settings.appearance.opencodeShadesofpurpleLightMode"
+    },
+    "opencode-shadesofpurple-dark": {
+      "cssPath": "themes/opencode-shadesofpurple-dark.css",
+      "backgroundColor": "#1A102B",
+      "i18nName": "settings.appearance.opencodeShadesofpurpleDark",
+      "i18nMode": "settings.appearance.opencodeShadesofpurpleDarkMode"
+    },
+    "opencode-monokai-light": {
+      "cssPath": "themes/opencode-monokai-light.css",
+      "backgroundColor": "#FDF8EC",
+      "i18nName": "settings.appearance.opencodeMonokaiLight",
+      "i18nMode": "settings.appearance.opencodeMonokaiLightMode"
+    },
+    "opencode-monokai-dark": {
+      "cssPath": "themes/opencode-monokai-dark.css",
+      "backgroundColor": "#272822",
+      "i18nName": "settings.appearance.opencodeMonokaiDark",
+      "i18nMode": "settings.appearance.opencodeMonokaiDarkMode"
+    },
+    "opencode-nord-light": {
+      "cssPath": "themes/opencode-nord-light.css",
+      "backgroundColor": "#ECEFF4",
+      "i18nName": "settings.appearance.opencodeNordLight",
+      "i18nMode": "settings.appearance.opencodeNordLightMode"
+    },
+    "opencode-nord-dark": {
+      "cssPath": "themes/opencode-nord-dark.css",
+      "backgroundColor": "#2E3440",
+      "i18nName": "settings.appearance.opencodeNordDark",
+      "i18nMode": "settings.appearance.opencodeNordDarkMode"
+    },
+    "opencode-nightowl-light": {
+      "cssPath": "themes/opencode-nightowl-light.css",
+      "backgroundColor": "#F0F0F0",
+      "i18nName": "settings.appearance.opencodeNightowlLight",
+      "i18nMode": "settings.appearance.opencodeNightowlLightMode"
+    },
+    "opencode-nightowl-dark": {
+      "cssPath": "themes/opencode-nightowl-dark.css",
+      "backgroundColor": "#011627",
+      "i18nName": "settings.appearance.opencodeNightowlDark",
+      "i18nMode": "settings.appearance.opencodeNightowlDarkMode"
+    },
+    "opencode-zenburn-dark": {
+      "cssPath": "themes/opencode-zenburn-dark.css",
+      "backgroundColor": "#3F3F3F",
+      "i18nName": "settings.appearance.opencodeZenburnDark",
+      "i18nMode": "settings.appearance.opencodeZenburnDarkMode"
+    },
+    "opencode-matrix-light": {
+      "cssPath": "themes/opencode-matrix-light.css",
+      "backgroundColor": "#EEF3EA",
+      "i18nName": "settings.appearance.opencodeMatrixLight",
+      "i18nMode": "settings.appearance.opencodeMatrixLightMode"
+    },
+    "opencode-matrix-dark": {
+      "cssPath": "themes/opencode-matrix-dark.css",
+      "backgroundColor": "#0A0E0A",
+      "i18nName": "settings.appearance.opencodeMatrixDark",
+      "i18nMode": "settings.appearance.opencodeMatrixDarkMode"
+    },
+    "opencode-tokyonight-light": {
+      "cssPath": "themes/opencode-tokyonight-light.css",
+      "backgroundColor": "#E1E2E7",
+      "i18nName": "settings.appearance.opencodeTokyonightLight",
+      "i18nMode": "settings.appearance.opencodeTokyonightLightMode"
+    },
+    "opencode-tokyonight-dark": {
+      "cssPath": "themes/opencode-tokyonight-dark.css",
+      "backgroundColor": "#1A1B26",
+      "i18nName": "settings.appearance.opencodeTokyonightDark",
+      "i18nMode": "settings.appearance.opencodeTokyonightDarkMode"
+    },
+    "opencode-everforest-light": {
+      "cssPath": "themes/opencode-everforest-light.css",
+      "backgroundColor": "#FDF6E3",
+      "i18nName": "settings.appearance.opencodeEverforestLight",
+      "i18nMode": "settings.appearance.opencodeEverforestLightMode"
+    },
+    "opencode-everforest-dark": {
+      "cssPath": "themes/opencode-everforest-dark.css",
+      "backgroundColor": "#2D353B",
+      "i18nName": "settings.appearance.opencodeEverforestDark",
+      "i18nMode": "settings.appearance.opencodeEverforestDarkMode"
+    },
+    "opencode-vesper-light": {
+      "cssPath": "themes/opencode-vesper-light.css",
+      "backgroundColor": "#F0F0F0",
+      "i18nName": "settings.appearance.opencodeVesperLight",
+      "i18nMode": "settings.appearance.opencodeVesperLightMode"
+    },
+    "opencode-vesper-dark": {
+      "cssPath": "themes/opencode-vesper-dark.css",
+      "backgroundColor": "#101010",
+      "i18nName": "settings.appearance.opencodeVesperDark",
+      "i18nMode": "settings.appearance.opencodeVesperDarkMode"
+    },
+    "opencode-onedarkpro-light": {
+      "cssPath": "themes/opencode-onedarkpro-light.css",
+      "backgroundColor": "#F5F6F8",
+      "i18nName": "settings.appearance.opencodeOnedarkproLight",
+      "i18nMode": "settings.appearance.opencodeOnedarkproLightMode"
+    },
+    "opencode-onedarkpro-dark": {
+      "cssPath": "themes/opencode-onedarkpro-dark.css",
+      "backgroundColor": "#1E222A",
+      "i18nName": "settings.appearance.opencodeOnedarkproDark",
+      "i18nMode": "settings.appearance.opencodeOnedarkproDarkMode"
+    },
+    "opencode-solarized-light": {
+      "cssPath": "themes/opencode-solarized-light.css",
+      "backgroundColor": "#FDF6E3",
+      "i18nName": "settings.appearance.opencodeSolarizedLight",
+      "i18nMode": "settings.appearance.opencodeSolarizedLightMode"
+    },
+    "opencode-solarized-dark": {
+      "cssPath": "themes/opencode-solarized-dark.css",
+      "backgroundColor": "#002B36",
+      "i18nName": "settings.appearance.opencodeSolarizedDark",
+      "i18nMode": "settings.appearance.opencodeSolarizedDarkMode"
+    },
+    "opencode-one-dark-light": {
+      "cssPath": "themes/opencode-one-dark-light.css",
+      "backgroundColor": "#FAFAFA",
+      "i18nName": "settings.appearance.opencodeOneDarkLight",
+      "i18nMode": "settings.appearance.opencodeOneDarkLightMode"
+    },
+    "opencode-one-dark-dark": {
+      "cssPath": "themes/opencode-one-dark-dark.css",
+      "backgroundColor": "#282C34",
+      "i18nName": "settings.appearance.opencodeOneDarkDark",
+      "i18nMode": "settings.appearance.opencodeOneDarkDarkMode"
+    },
+    "opencode-synthwave84-dark": {
+      "cssPath": "themes/opencode-synthwave84-dark.css",
+      "backgroundColor": "#262335",
+      "i18nName": "settings.appearance.opencodeSynthwave84Dark",
+      "i18nMode": "settings.appearance.opencodeSynthwave84DarkMode"
+    },
+    "opencode-osaka-jade-dark": {
+      "cssPath": "themes/opencode-osaka-jade-dark.css",
+      "backgroundColor": "#111C18",
+      "i18nName": "settings.appearance.opencodeOsakaJadeDark",
+      "i18nMode": "settings.appearance.opencodeOsakaJadeDarkMode"
+    },
+    "opencode-palenight-light": {
+      "cssPath": "themes/opencode-palenight-light.css",
+      "backgroundColor": "#FAFAFA",
+      "i18nName": "settings.appearance.opencodePalenightLight",
+      "i18nMode": "settings.appearance.opencodePalenightLightMode"
+    },
+    "opencode-palenight-dark": {
+      "cssPath": "themes/opencode-palenight-dark.css",
+      "backgroundColor": "#292D3E",
+      "i18nName": "settings.appearance.opencodePalenightDark",
+      "i18nMode": "settings.appearance.opencodePalenightDarkMode"
+    },
+    "opencode-rosepine-light": {
+      "cssPath": "themes/opencode-rosepine-light.css",
+      "backgroundColor": "#FAF4ED",
+      "i18nName": "settings.appearance.opencodeRosepineLight",
+      "i18nMode": "settings.appearance.opencodeRosepineLightMode"
+    },
+    "opencode-rosepine-dark": {
+      "cssPath": "themes/opencode-rosepine-dark.css",
+      "backgroundColor": "#191724",
+      "i18nName": "settings.appearance.opencodeRosepineDark",
+      "i18nMode": "settings.appearance.opencodeRosepineDarkMode"
+    },
+    "opencode-orng-light": {
+      "cssPath": "themes/opencode-orng-light.css",
+      "backgroundColor": "#FFFFFF",
+      "i18nName": "settings.appearance.opencodeOrngLight",
+      "i18nMode": "settings.appearance.opencodeOrngLightMode"
+    },
+    "opencode-orng-dark": {
+      "cssPath": "themes/opencode-orng-dark.css",
+      "backgroundColor": "#0A0A0A",
+      "i18nName": "settings.appearance.opencodeOrngDark",
+      "i18nMode": "settings.appearance.opencodeOrngDarkMode"
+    },
+    "opencode-catppuccin-macchiato-light": {
+      "cssPath": "themes/opencode-catppuccin-macchiato-light.css",
+      "backgroundColor": "#24273A",
+      "i18nName": "settings.appearance.opencodeCatppuccinMacchiatoLight",
+      "i18nMode": "settings.appearance.opencodeCatppuccinMacchiatoLightMode"
+    },
+    "opencode-catppuccin-macchiato-dark": {
+      "cssPath": "themes/opencode-catppuccin-macchiato-dark.css",
+      "backgroundColor": "#24273A",
+      "i18nName": "settings.appearance.opencodeCatppuccinMacchiatoDark",
+      "i18nMode": "settings.appearance.opencodeCatppuccinMacchiatoDarkMode"
+    },
+    "opencode-mercury-light": {
+      "cssPath": "themes/opencode-mercury-light.css",
+      "backgroundColor": "#FFFFFF",
+      "i18nName": "settings.appearance.opencodeMercuryLight",
+      "i18nMode": "settings.appearance.opencodeMercuryLightMode"
+    },
+    "opencode-mercury-dark": {
+      "cssPath": "themes/opencode-mercury-dark.css",
+      "backgroundColor": "#171721",
+      "i18nName": "settings.appearance.opencodeMercuryDark",
+      "i18nMode": "settings.appearance.opencodeMercuryDarkMode"
+    },
+    "opencode-cobalt2-light": {
+      "cssPath": "themes/opencode-cobalt2-light.css",
+      "backgroundColor": "#FFFFFF",
+      "i18nName": "settings.appearance.opencodeCobalt2Light",
+      "i18nMode": "settings.appearance.opencodeCobalt2LightMode"
+    },
+    "opencode-lucent-orng-light": {
+      "cssPath": "themes/opencode-lucent-orng-light.css",
+      "backgroundColor": "#FFF5F0",
+      "i18nName": "settings.appearance.opencodeLucentOrngLight",
+      "i18nMode": "settings.appearance.opencodeLucentOrngLightMode"
+    },
+    "opencode-lucent-orng-dark": {
+      "cssPath": "themes/opencode-lucent-orng-dark.css",
+      "backgroundColor": "#2A1A15",
+      "i18nName": "settings.appearance.opencodeLucentOrngDark",
+      "i18nMode": "settings.appearance.opencodeLucentOrngDarkMode"
+    },
+    "opencode-catppuccin-frappe-light": {
+      "cssPath": "themes/opencode-catppuccin-frappe-light.css",
+      "backgroundColor": "#303446",
+      "i18nName": "settings.appearance.opencodeCatppuccinFrappeLight",
+      "i18nMode": "settings.appearance.opencodeCatppuccinFrappeLightMode"
+    },
+    "opencode-catppuccin-frappe-dark": {
+      "cssPath": "themes/opencode-catppuccin-frappe-dark.css",
+      "backgroundColor": "#303446",
+      "i18nName": "settings.appearance.opencodeCatppuccinFrappeDark",
+      "i18nMode": "settings.appearance.opencodeCatppuccinFrappeDarkMode"
+    },
+    "opencode-zenburn-light": {
+      "cssPath": "themes/opencode-zenburn-light.css",
+      "backgroundColor": "#FFFFEF",
+      "i18nName": "settings.appearance.opencodeZenburnLight",
+      "i18nMode": "settings.appearance.opencodeZenburnLightMode"
+    },
+    "opencode-flexoki-light": {
+      "cssPath": "themes/opencode-flexoki-light.css",
+      "backgroundColor": "#FFFCF0",
+      "i18nName": "settings.appearance.opencodeFlexokiLight",
+      "i18nMode": "settings.appearance.opencodeFlexokiLightMode"
+    },
+    "opencode-flexoki-dark": {
+      "cssPath": "themes/opencode-flexoki-dark.css",
+      "backgroundColor": "#100F0F",
+      "i18nName": "settings.appearance.opencodeFlexokiDark",
+      "i18nMode": "settings.appearance.opencodeFlexokiDarkMode"
+    },
+    "opencode-github-light": {
+      "cssPath": "themes/opencode-github-light.css",
+      "backgroundColor": "#FFFFFF",
+      "i18nName": "settings.appearance.opencodeGithubLight",
+      "i18nMode": "settings.appearance.opencodeGithubLightMode"
+    },
+    "opencode-github-dark": {
+      "cssPath": "themes/opencode-github-dark.css",
+      "backgroundColor": "#0D1117",
+      "i18nName": "settings.appearance.opencodeGithubDark",
+      "i18nMode": "settings.appearance.opencodeGithubDarkMode"
+    },
+    "opencode-material-light": {
+      "cssPath": "themes/opencode-material-light.css",
+      "backgroundColor": "#FAFAFA",
+      "i18nName": "settings.appearance.opencodeMaterialLight",
+      "i18nMode": "settings.appearance.opencodeMaterialLightMode"
+    },
+    "opencode-material-dark": {
+      "cssPath": "themes/opencode-material-dark.css",
+      "backgroundColor": "#263238",
+      "i18nName": "settings.appearance.opencodeMaterialDark",
+      "i18nMode": "settings.appearance.opencodeMaterialDarkMode"
+    },
+    "opencode-synthwave84-light": {
+      "cssPath": "themes/opencode-synthwave84-light.css",
+      "backgroundColor": "#FAFAFA",
+      "i18nName": "settings.appearance.opencodeSynthwave84Light",
+      "i18nMode": "settings.appearance.opencodeSynthwave84LightMode"
+    },
+    "opencode-osaka-jade-light": {
+      "cssPath": "themes/opencode-osaka-jade-light.css",
+      "backgroundColor": "#F6F5DD",
+      "i18nName": "settings.appearance.opencodeOsakaJadeLight",
+      "i18nMode": "settings.appearance.opencodeOsakaJadeLightMode"
     }
   }
 }

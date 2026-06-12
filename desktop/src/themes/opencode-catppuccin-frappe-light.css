@@ -1,0 +1,83 @@
+/* OpenCode Catppuccin Frappe Light theme port for OpenHanako */
+[data-theme="opencode-catppuccin-frappe-light"] {
+  /* OpenCode palette */
+  --opencode-neutral: #303446;
+  --opencode-ink: #c6d0f5;
+  --opencode-primary: #8da4e2;
+  --opencode-accent: #f4b8e4;
+  --opencode-success: #a6d189;
+  --opencode-warning: #e5c890;
+  --opencode-error: #e78284;
+  --opencode-info: #81c8be;
+  --opencode-diff-add: #a6d189;
+  --opencode-diff-delete: #e78284;
+  --opencode-text-weak: #b5bfe2;
+
+  /* Base surfaces */
+  --bg: #303446;
+  --bg-card: #2e3243;
+  --bg-glass: rgba(48, 52, 70, 0.92);
+  --sidebar-bg: #2d3142;
+
+  /* Text */
+  --text: #c6d0f5;
+  --text-light: #a8b0d2;
+  --text-muted: #b5bfe2;
+  --hana-text: #c6d0f5;
+
+  /* Brand / interaction */
+  --accent: #8da4e2;
+  --accent-hover: #7e93cb;
+  --accent-light: rgba(141, 164, 226, 0.12);
+  --accent-rgb: 141, 164, 226;
+  --link: #8da4e2;
+
+  /* Secondary accent */
+  --coral: #f4b8e4;
+  --coral-rgb: 244, 184, 228;
+
+  /* State colors */
+  --green: #a6d189;
+  --green-rgb: 166, 209, 137;
+  --danger: #e78284;
+  --danger-rgb: 231, 130, 132;
+
+  /* Borders / shadows */
+  --border: rgba(198, 208, 245, 0.14);
+  --shadow: 0 18px 40px rgba(0, 0, 0, 0.12);
+
+  /* Common overlays */
+  --overlay-subtle: rgba(198, 208, 245, 0.035);
+  --overlay-light: rgba(198, 208, 245, 0.07);
+  --overlay-medium: rgba(198, 208, 245, 0.12);
+  --overlay-strong: rgba(198, 208, 245, 0.2);
+
+  /* Chat bubbles / notes */
+  --user-bg: rgba(141, 164, 226, 0.1);
+  --jian-note-bg: rgba(244, 184, 228, 0.1);
+  --jian-note-border: rgba(244, 184, 228, 0.24);
+
+  /* Mood / tool chips */
+  --mood-bg: rgba(129, 200, 190, 0.1);
+  --mood-text: #81c8be;
+  --mood-border: rgba(129, 200, 190, 0.24);
+
+  --tool-bg: rgba(141, 164, 226, 0.1);
+  --tool-text: #8da4e2;
+
+  /* Attach / drag-drop */
+  --drop-overlay-bg: rgba(48, 52, 70, 0.72);
+  --attach-bg: rgba(198, 208, 245, 0.045);
+
+  /* Permission / warnings */
+  --permission-auto: #e5c890;
+  --permission-request: #8da4e2;
+
+  /* Tabs */
+  --tab-slider-bg: rgba(141, 164, 226, 0.14);
+  --tab-slider-shadow: 0 8px 18px rgba(141, 164, 226, 0.12);
+
+  --select-arrow: none;
+
+  color-scheme: light;
+}
