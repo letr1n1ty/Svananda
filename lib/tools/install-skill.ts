@@ -126,7 +126,6 @@ ${skillContent}`;
       signal: undefined,
       messages: [{ role: "user", content: prompt }],
       temperature: 0,
-      maxTokens: 200,
       timeoutMs: SAFETY_REVIEW_TIMEOUT,
       usageLedger: utilCfg.usageLedger,
       usageContext: {
