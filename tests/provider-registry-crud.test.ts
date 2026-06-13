@@ -20,9 +20,21 @@ function writeAddedModels(providers) {
 }
 
 function readAddedModels() {
+  const catalogPath = path.join(tmpDir, "provider-catalog.json");
+  if (fs.existsSync(catalogPath)) {
+    return readProviderCatalog().providers || {};
+  }
   const ymlPath = path.join(tmpDir, "added-models.yaml");
   const raw = YAML.load(fs.readFileSync(ymlPath, "utf-8"));
   return raw?.providers || {};
+}
+
+function readProviderCatalog() {
+  return JSON.parse(fs.readFileSync(path.join(tmpDir, "provider-catalog.json"), "utf-8"));
+}
+
+function readProviderCatalogMeta() {
+  return readProviderCatalog().meta || {};
 }
 
 /** 创建一个 registry，注册一个测试插件 */
@@ -55,6 +67,36 @@ afterEach(() => {
 // ── getCredentials ───────────────────────────────────────────────────────────
 
 describe("getCredentials", () => {
+  it("migrates legacy added-models.yaml to provider-catalog.json and uses v2 as the live provider source", () => {
+    writeAddedModels({
+      "test-provider": {
+        api_key: "sk-test-123",
+        base_url: "https://custom.api.com/v1",
+        api: "openai-completions",
+        models: ["model-a"],
+      },
+    });
+    const legacyPath = path.join(tmpDir, "added-models.yaml");
+    const legacyBefore = fs.readFileSync(legacyPath, "utf-8");
+
+    const reg = makeRegistry();
+
+    expect(reg.getCredentials("test-provider")).toMatchObject({
+      apiKey: "sk-test-123",
+      baseUrl: "https://custom.api.com/v1",
+      api: "openai-completions",
+    });
+    expect(readProviderCatalog().providers["test-provider"].models).toEqual(["model-a"]);
+
+    reg.updateModelEntry("test-provider", "model-a", { image: true });
+
+    expect(fs.readFileSync(legacyPath, "utf-8")).toBe(legacyBefore);
+    expect(readProviderCatalog().providers["test-provider"].models[0]).toMatchObject({
+      id: "model-a",
+      image: true,
+    });
+  });
+
   it("keeps MiniMax Token Plan as a distinct Anthropic-compatible provider boundary", () => {
     writeAddedModels({});
     const reg = new ProviderRegistry(tmpDir);
@@ -517,6 +559,40 @@ describe("getAllProvidersRaw", () => {
   });
 });
 
+// ── provider catalog capabilities ───────────────────────────────────────────
+
+describe("provider catalog capabilities", () => {
+  it("exposes non-chat capability providers from provider-catalog.json", () => {
+    fs.writeFileSync(
+      path.join(tmpDir, "provider-catalog.json"),
+      JSON.stringify({
+        catalogVersion: 2,
+        providers: {},
+        capabilities: {
+          "web.search": {
+            providers: [
+              { id: "brave", source: "api", requiresApiKey: true },
+              { id: "duckduckgo_browser", source: "browser", requiresApiKey: false },
+            ],
+          },
+        },
+        meta: {},
+      }, null, 2) + "\n",
+      "utf-8",
+    );
+    const reg = makeRegistry();
+
+    const providers = reg.getCapabilityProviders("web.search");
+    providers.push({ id: "polluted", source: "test" });
+
+    expect(reg.getCapabilityProviders("web.search")).toEqual([
+      { id: "brave", source: "api", requiresApiKey: true },
+      { id: "duckduckgo_browser", source: "browser", requiresApiKey: false },
+    ]);
+    expect(reg.getCapabilityProviders("missing.capability")).toEqual([]);
+  });
+});
+
 describe("model defaults", () => {
   it("stores thinking defaults without creating a chat model allow list", () => {
     writeAddedModels({
@@ -860,6 +936,59 @@ describe("updateModelEntry type field", () => {
       groundingMode: "prompted",
     });
   });
+
+  it("persists an explicit tool use contract as model metadata", () => {
+    writeAddedModels({
+      "test-provider": {
+        api_key: "key-123",
+        models: ["tool-model"],
+      },
+    });
+    const reg = makeRegistry();
+
+    reg.updateModelEntry("test-provider", "tool-model", {
+      toolUse: {
+        supportsTools: true,
+        dialect: "anthropic",
+        supportsParallelToolCalls: true,
+        supportsForcedToolChoice: true,
+        supportsServerTools: false,
+        toolResultFormat: "content_block",
+        unknown: "drop-me",
+      },
+    });
+
+    const raw = readAddedModels();
+    const entry = raw["test-provider"].models.find(
+      m => (typeof m === "object" ? m.id : m) === "tool-model"
+    );
+    expect(entry.toolUse).toEqual({
+      supportsTools: true,
+      dialect: "anthropic",
+      supportsParallelToolCalls: true,
+      supportsForcedToolChoice: true,
+      supportsServerTools: false,
+      toolResultFormat: "content_block",
+    });
+  });
+
+  it("rejects malformed tool use contracts instead of applying a default dialect", () => {
+    writeAddedModels({
+      "test-provider": {
+        api_key: "key-123",
+        models: ["tool-model"],
+      },
+    });
+    const reg = makeRegistry();
+
+    expect(() => reg.updateModelEntry("test-provider", "tool-model", {
+      toolUse: {
+        supportsTools: true,
+        dialect: "surprise-wire-format",
+        toolResultFormat: "message",
+      },
+    })).toThrow(/invalid toolUse contract/i);
+  });
 });
 
 // ── media model CRUD ─────────────────────────────────────────────────────────
@@ -1035,13 +1164,11 @@ describe("removeProvider", () => {
     const reg = makeRegistry();
 
     reg.removeProvider("test-provider");
-    let raw = YAML.load(fs.readFileSync(path.join(tmpDir, "added-models.yaml"), "utf-8"));
-    expect(raw._deleted_providers).toContain("test-provider");
+    expect(readProviderCatalogMeta().deletedProviders).toContain("test-provider");
 
     reg.saveProvider("test-provider", { api_key: "sk-new" });
-    raw = YAML.load(fs.readFileSync(path.join(tmpDir, "added-models.yaml"), "utf-8"));
-    expect(raw._deleted_providers || []).not.toContain("test-provider");
-    expect(raw.providers["test-provider"].api_key).toBe("sk-new");
+    expect(readProviderCatalogMeta().deletedProviders || []).not.toContain("test-provider");
+    expect(readAddedModels()["test-provider"].api_key).toBe("sk-new");
   });
 
   it("删除不存在的 provider 不报错", () => {

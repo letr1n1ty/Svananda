@@ -1,7 +1,7 @@
 /**
  * model-sync.js 单元测试
  *
- * 测试：added-models.yaml → models.json 单向投影
+ * 测试：Provider Catalog provider configs → models.json 单向投影
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
@@ -220,6 +220,10 @@ async function loadSync() {
   return mod.syncModels;
 }
 
+function readProviderCatalogProviders() {
+  return JSON.parse(fs.readFileSync(path.join(tmpDir, "provider-catalog.json"), "utf-8")).providers || {};
+}
+
 describe("syncModels", () => {
   it("writes providers with credentials and models to models.json", async () => {
     const syncModels = await loadSync();
@@ -308,6 +312,63 @@ describe("syncModels", () => {
       id: "reasoning-model",
       defaultThinkingLevel: "high",
     });
+  });
+
+  it("projects explicit tool use contracts into runtime model metadata", async () => {
+    const syncModels = await loadSync();
+
+    const providers = {
+      custom: {
+        base_url: "https://custom.api.com/v1",
+        api: "openai-completions",
+        api_key: "sk-test",
+        models: [
+          {
+            id: "tool-model",
+            toolUse: {
+              supportsTools: true,
+              dialect: "openai",
+              supportsParallelToolCalls: true,
+              toolResultFormat: "message",
+            },
+          },
+        ],
+      },
+    };
+
+    syncModels(providers, { modelsJsonPath });
+
+    const result = JSON.parse(fs.readFileSync(modelsJsonPath, "utf-8"));
+    expect(result.providers.custom.models[0].toolUse).toEqual({
+      supportsTools: true,
+      dialect: "openai",
+      supportsParallelToolCalls: true,
+      toolResultFormat: "message",
+    });
+  });
+
+  it("rejects malformed tool use contracts instead of silently falling back", async () => {
+    const syncModels = await loadSync();
+
+    const providers = {
+      custom: {
+        base_url: "https://custom.api.com/v1",
+        api: "openai-completions",
+        api_key: "sk-test",
+        models: [
+          {
+            id: "tool-model",
+            toolUse: {
+              supportsTools: true,
+              dialect: "surprise-wire-format",
+              toolResultFormat: "message",
+            },
+          },
+        ],
+      },
+    };
+
+    expect(() => syncModels(providers, { modelsJsonPath })).toThrow(/invalid toolUse contract/i);
   });
 
   it("skips providers without api_key (and not localhost/OAuth)", async () => {
@@ -1286,9 +1347,9 @@ describe("syncModels", () => {
 
     const result = await mm.setModelDefaultThinkingLevel({ id: "gpt-4o", provider: "openai" }, "high");
 
-    const raw = YAML.load(fs.readFileSync(path.join(tmpDir, "added-models.yaml"), "utf-8"));
-    expect(raw.providers.openai.models).toBeUndefined();
-    expect(raw.providers.openai.model_defaults).toEqual({
+    const providers = readProviderCatalogProviders();
+    expect(providers.openai.models).toBeUndefined();
+    expect(providers.openai.model_defaults).toEqual({
       "gpt-4o": { thinking_level: "high" },
     });
     expect(result.thinkingLevel).toBe("high");
@@ -1326,10 +1387,25 @@ describe("syncModels", () => {
     expect(result.providers.deepseek.models[0].id).toBe("deepseek-chat");
     expect(result.providers["dashscope-coding"]).toBeUndefined();
     expect(result.providers["string-provider"]).toBeUndefined();
-    expect(mm.availableModels).toEqual([
-      { id: "deepseek-chat", provider: "deepseek" },
-      { id: "unconfigured-model", provider: "other" },
-    ]);
+    expect(mm.availableModels).toEqual([{ id: "deepseek-chat", provider: "deepseek" }]);
+  });
+
+  it("keeps SDK-auth alias providers available without a provider model allow list", async () => {
+    const { ModelManager } = await import("../core/model-manager.ts");
+    fs.writeFileSync(path.join(tmpDir, "added-models.yaml"), "providers: {}\n", "utf-8");
+
+    const mm = new ModelManager({ hanakoHome: tmpDir });
+    mm._modelRegistry = {
+      refresh: vi.fn(),
+      getAvailable: vi.fn().mockResolvedValue([
+        { id: "gpt-5-codex", provider: "openai-codex" },
+        { id: "shadow-model", provider: "shadow-sdk-provider" },
+      ]),
+    };
+
+    await mm.refreshAvailable();
+
+    expect(mm.availableModels).toEqual([{ id: "gpt-5-codex", provider: "openai-codex" }]);
   });
 
   it("handles multiple providers in one call", async () => {

@@ -15,6 +15,15 @@ afterEach(() => {
   fs.rmSync(tmpHome, { recursive: true, force: true });
 });
 
+function readPersistedProviders() {
+  const catalogPath = path.join(tmpHome, "provider-catalog.json");
+  if (fs.existsSync(catalogPath)) {
+    return JSON.parse(fs.readFileSync(catalogPath, "utf-8")).providers || {};
+  }
+  const saved = YAML.load(fs.readFileSync(path.join(tmpHome, "added-models.yaml"), "utf-8"));
+  return saved?.providers || {};
+}
+
 describe("ProviderRegistry media capabilities", () => {
   it("exposes built-in official image providers from media capabilities", () => {
     const registry = new ProviderRegistry(tmpHome);
@@ -362,8 +371,8 @@ describe("custom provider image protocol inference (#1627)", () => {
     expect(registry.getMediaModels("my-proxy", "image_generation")).toEqual([
       expect.objectContaining({ id: "flux-1.1-pro", protocolId: "openai-images" }),
     ]);
-    const saved = YAML.load(fs.readFileSync(path.join(tmpHome, "added-models.yaml"), "utf-8"));
-    expect(saved.providers["my-proxy"].media.image_generation.models).toEqual([
+    const savedProviders = readPersistedProviders();
+    expect(savedProviders["my-proxy"].media.image_generation.models).toEqual([
       expect.objectContaining({ id: "flux-1.1-pro", protocolId: "openai-images" }),
     ]);
   });

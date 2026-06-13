@@ -1,5 +1,5 @@
 /**
- * model-sync.js — added-models.yaml → models.json 单向投影
+ * model-sync.js — Provider Catalog provider configs → models.json 单向投影
  *
  * 系统中唯一写 models.json 的地方。从 providers 配置（snake_case）
  * 投影为 Pi SDK 格式（camelCase），附加 known-models.json 元数据。
@@ -11,6 +11,7 @@ import { lookupKnown } from "../shared/known-models.ts";
 import { atomicWriteSync } from "../shared/safe-fs.ts";
 import {
   normalizeModelProtocolCompat,
+  normalizeToolUseContract,
   normalizeVisionCapabilities,
   withHanaAudioInputCompat,
   withHanaVideoInputCompat,
@@ -118,6 +119,11 @@ function buildModelOverride(modelEntry, modelDefaults = {}) {
   if (modelEntry.xhigh !== undefined) override.xhigh = modelEntry.xhigh;
   const compat = normalizeModelProtocolCompat(modelEntry.compat);
   if (compat) override.compat = compat;
+  const toolUse = normalizeToolUseContract(modelEntry.toolUse);
+  if (modelEntry.toolUse !== undefined && !toolUse) {
+    throw new Error(`invalid toolUse contract for model "${getModelId(modelEntry) || "unknown"}"`);
+  }
+  if (toolUse) override.toolUse = toolUse;
   const visionCapabilities = image === true
     ? normalizeVisionCapabilities(modelEntry.visionCapabilities)
     : null;
@@ -176,6 +182,13 @@ function buildModelEntry(modelEntry, provider, baseUrl = "", api = "openai-compl
   if (known?.quirks?.length) entry.quirks = known.quirks;
   if (piBuiltin?.headers) entry.headers = { ...piBuiltin.headers };
 
+  const rawToolUse = isObj && modelEntry.toolUse !== undefined ? modelEntry.toolUse : known?.toolUse;
+  const toolUse = normalizeToolUseContract(rawToolUse);
+  if (rawToolUse !== undefined && !toolUse) {
+    throw new Error(`invalid toolUse contract for model "${id}"`);
+  }
+  if (toolUse) entry.toolUse = toolUse;
+
   const rawVisionCapabilities = isObj && modelEntry.visionCapabilities !== undefined
     ? modelEntry.visionCapabilities
     : known?.visionCapabilities;
@@ -223,7 +236,7 @@ function filterChatModelEntries(provider, models) {
 /**
  * 单向投影：providers 配置 → models.json（Pi SDK 格式）
  *
- * @param {Record<string, object>} providers - added-models.yaml 中的 providers 块（snake_case）
+ * @param {Record<string, object>} providers - Provider Catalog 中的 providers 块（snake_case）
  * @param {object} [opts]
  * @param {string} opts.modelsJsonPath - models.json 输出路径
  * @param {string} [opts.authJsonPath] - auth.json 路径（OAuth 凭证查找用）

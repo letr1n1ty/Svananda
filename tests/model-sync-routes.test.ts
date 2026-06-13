@@ -472,6 +472,12 @@ describe("model sync related routes", () => {
           name: "Gpt 5.4",
           provider: "openai-codex",
           reasoning: true,
+          toolUse: {
+            supportsTools: true,
+            dialect: "openai",
+            toolResultFormat: "message",
+            supportsParallelToolCalls: true,
+          },
         },
         {
           id: "deepseek-v4-pro",
@@ -500,6 +506,12 @@ describe("model sync related routes", () => {
     expect(allRes.status).toBe(200);
     expect(allData.models[0].id).toBe("gpt-5.4");
     expect(allData.models[0].name).toBe("Gpt 5.4");
+    expect(allData.models[0].toolUse).toEqual({
+      supportsTools: true,
+      dialect: "openai",
+      toolResultFormat: "message",
+      supportsParallelToolCalls: true,
+    });
     expect(allData.models[1].xhigh).toBe(true);
     expect(allData.models[2]).toMatchObject({
       id: "gpt-audio-mini",

@@ -57,12 +57,12 @@ export function createProvidersRoute(engine: any) {
   // ── Provider Summary ──
 
   /**
-   * 统一概览：合并 added-models.yaml + OAuth status + SDK 模型
+   * 统一概览：合并 Provider Catalog + OAuth status + SDK 模型
    * 前端新 ProvidersTab 的核心数据源
    */
   route.get("/providers/summary", async (c) => {
     const rawProviders = engine.providerRegistry.getAllProvidersRaw();
-    // 补全凭证和模型列表（getAllProvidersRaw 返回的是 added-models.yaml 原始数据）
+    // 补全凭证和模型列表（getAllProvidersRaw 返回的是 Provider Catalog 原始 provider 数据）
     const providers: Record<string, any> = {};
     for (const [name, p] of Object.entries(rawProviders) as [string, any][]) {
       const entry = engine.providerRegistry.get(name);
@@ -102,12 +102,12 @@ export function createProvidersRoute(engine: any) {
       return null;
     }
 
-    // 先处理 added-models.yaml 中的 provider（保持顺序）
+    // 先处理 Provider Catalog 中的 provider（保持顺序）
     for (const [name, p] of Object.entries(providers)) {
       const isOAuth = provRegistry.isOAuth(name);
       const authType = provRegistry.getAuthType?.(name) || (isOAuth ? "oauth" : "api-key");
       const oauthInfo = getOAuthLoginInfo(name);
-      // added-models.yaml 是模型列表的唯一信源
+      // Provider Catalog 是用户模型列表的唯一信源
       const rawModels = p.models || [];
       const customModels = oauthCustom[name] || [];
       const allowsMissingApiKey = !!p.base_url && provRegistry.allowsMissingApiKey?.(name, p.base_url);
@@ -142,7 +142,7 @@ export function createProvidersRoute(engine: any) {
       };
     }
 
-    // 追加 OAuth-only provider（有 auth.json 但没在 added-models.yaml 里）
+    // 追加 OAuth-only provider（有 auth.json 但没在 Provider Catalog 里）
     // 遍历已注册的 OAuth plugin，用 authJsonKey 查 oauthLoginMap
     for (const oauthId of provRegistry.getOAuthProviderIds()) {
       if (result[oauthId]) continue;
@@ -507,7 +507,7 @@ export function createProvidersRoute(engine: any) {
 
   /**
    * 更新模型元数据（context/image/video/reasoning/maxOutput/name）
-   * 写回 added-models.yaml → 触发 model-sync → SDK 模型对象更新
+   * 写回 Provider Catalog → 触发 model-sync → SDK 模型对象更新
    */
   route.put("/providers/:name/models/:modelId", async (c) => {
     const scopeDenied = denyWithoutScope(c, "providers.manage");
@@ -530,7 +530,7 @@ export function createProvidersRoute(engine: any) {
 
   /**
    * 删除模型配置
-   * 从 added-models.yaml 移除指定模型 → 触发 model-sync
+   * 从 Provider Catalog 移除指定模型 → 触发 model-sync
    */
   route.delete("/providers/:name/models/:modelId", async (c) => {
     const scopeDenied = denyWithoutScope(c, "providers.manage");

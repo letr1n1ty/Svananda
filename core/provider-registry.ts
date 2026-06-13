@@ -3,7 +3,7 @@
  *
  * 职责：
  *   - 管理所有已知 provider 的静态声明（能力、协议、认证类型）
- *   - 将插件声明与 added-models.yaml 用户配置合并为 ProviderEntry
+ *   - 将插件声明与 Provider Catalog 用户配置合并为 ProviderEntry
  *   - 读取 provider 凭证（api_key / base_url / api）
  *   - 管理 provider 的模型列表（CRUD + 持久化）
  *
@@ -24,10 +24,12 @@ import {
 import { validateProviderModels } from "../shared/provider-model-validation.ts";
 import {
   normalizeModelProtocolCompat,
+  normalizeToolUseContract,
   normalizeVisionCapabilities,
 } from "../shared/model-capabilities.ts";
 import { validateProviderRuntime } from "./media-runtime-contract.ts";
 import { capabilityKey, inferMediaProtocolId } from "./media-protocols.ts";
+import { ProviderCatalogStore } from "./provider-catalog.ts";
 
 const _defaultModels = JSON.parse(
   fs.readFileSync(fromRoot("lib", "default-models.json"), "utf-8"),
@@ -405,6 +407,7 @@ export class ProviderRegistry {
   declare _addedModelsMtime: any;
   declare _authJsonCache: any;
   declare _authJsonMtime: any;
+  declare _catalog: ProviderCatalogStore;
   declare _entries: any;
   declare _hanakoHome: any;
   declare _plugins: any;
@@ -413,6 +416,7 @@ export class ProviderRegistry {
    */
   constructor(hanakoHome) {
     this._hanakoHome = hanakoHome;
+    this._catalog = new ProviderCatalogStore(hanakoHome);
     /** @type {Map<string, ProviderPlugin>} id → plugin */
     this._plugins = new Map();
     /** @type {Map<string, ProviderEntry>} id → entry（合并后） */
@@ -448,7 +452,7 @@ export class ProviderRegistry {
   }
 
   /**
-   * 一次性迁移：将 agent config.models.overrides 的模型能力字段迁移到 added-models.yaml
+   * 一次性迁移：将 agent config.models.overrides 的模型能力字段迁移到 Provider Catalog
    * @param {string} agentsDir - agents 目录
    * @param {Function} [log] - 日志函数
    */
@@ -499,7 +503,7 @@ export class ProviderRegistry {
           const existing = typeof prov.models[idx] === "object" ? prov.models[idx] : { id: modelId };
           prov.models[idx] = { ...existing, ...meta };
           changed = true;
-          log(`[migrate] override ${modelId}: ${Object.keys(meta).join(",")} → added-models.yaml`);
+          log(`[migrate] override ${modelId}: ${Object.keys(meta).join(",")} → Provider Catalog`);
           break;
         }
       }
@@ -522,20 +526,19 @@ export class ProviderRegistry {
 
     if (changed) {
       this._saveAddedModels(userConfig);
-      log("[migrate] model overrides migrated to added-models.yaml");
+      log("[migrate] model overrides migrated to Provider Catalog");
     }
   }
 
-  /** 从 _hanakoHome 直接读 added-models.yaml（mtime 缓存，文件未变时跳过磁盘读取） */
+  /** 从 Provider Catalog v2 读取用户 provider 配置（mtime 缓存，文件未变时跳过磁盘读取） */
   _loadAddedModels() {
-    const ymlPath = path.join(this._hanakoHome, "added-models.yaml");
     try {
-      const mtime = fs.statSync(ymlPath).mtimeMs;
+      const catalog = this._catalog.load();
+      const mtime = fs.statSync(this._catalog.catalogPath).mtimeMs;
       if (this._addedModelsCache && mtime === this._addedModelsMtime) {
         return cloneData(this._addedModelsCache);
       }
-      const raw = safeReadYAMLSync(ymlPath, {}, YAML) || {};
-      this._addedModelsCache = normalizeProviderUserConfigMap(raw.providers);
+      this._addedModelsCache = normalizeProviderUserConfigMap(catalog.providers);
       this._addedModelsMtime = mtime;
       return cloneData(this._addedModelsCache);
     } catch {
@@ -543,36 +546,17 @@ export class ProviderRegistry {
     }
   }
 
-  /** 将 providers 对象写入 _hanakoHome/added-models.yaml */
+  /** 将 providers 对象写入 Provider Catalog v2 */
   _saveAddedModels(providers, meta: any = {}) {
-    const ymlPath = path.join(this._hanakoHome, "added-models.yaml");
-    // 读取现有文件以保留 _migrated 等顶层元数据
-    const existing = safeReadYAMLSync(ymlPath, {}, YAML) || {};
-    const header =
-      "# HanaAgent 供应商配置（全局，跨 agent 共享）\n" +
-      "# 由设置页面管理\n\n";
-    const data = { ...existing, providers: stripProviderRuntimeMetaMap(providers) };
-    if (Array.isArray(meta.deletedProviders)) {
-      const deletedProviders = normalizeDeletedProviders(meta.deletedProviders);
-      if (deletedProviders.length > 0) data[DELETED_PROVIDERS_KEY] = deletedProviders;
-      else delete data[DELETED_PROVIDERS_KEY];
-    }
-    const yamlStr = header + YAML.dump(data, {
-      indent: 2,
-      lineWidth: -1,
-      sortKeys: false,
-      quotingType: "\"",
-      forceQuotes: false,
-    });
-    atomicWriteSync(ymlPath, yamlStr);
+    this._catalog.saveProviders(stripProviderRuntimeMetaMap(providers), meta);
     // 写入后失效缓存，下次 _loadAddedModels 会重读
     this._addedModelsCache = null;
     this._addedModelsMtime = 0;
   }
 
   /**
-   * 从 added-models.yaml 加载用户配置，与所有插件声明合并
-   * 每次 added-models.yaml 变更后调用
+   * 从 Provider Catalog 加载用户配置，与所有插件声明合并
+   * 每次 Provider Catalog 变更后调用
    */
   reload() {
     this._entries.clear();
@@ -584,7 +568,7 @@ export class ProviderRegistry {
       this._entries.set(id, this._merge(plugin, uc, true));
     }
 
-    // 2. 处理 added-models.yaml 中有但没有对应插件的条目（用户自定义 provider）
+    // 2. 处理 Provider Catalog 中有但没有对应插件的条目（用户自定义 provider）
     for (const [id, uc] of Object.entries(userConfig) as [string, any][]) {
       if (this._entries.has(id)) continue;
       // 没有插件声明，从配置推断
@@ -653,6 +637,16 @@ export class ProviderRegistry {
 
   getProviderCapabilities(providerId) {
     return this.get(providerId)?.capabilities || null;
+  }
+
+  getCapabilityRegistry() {
+    return cloneData(this._catalog.load().capabilities || {});
+  }
+
+  getCapabilityProviders(capability) {
+    if (typeof capability !== "string" || !capability.trim()) return [];
+    const config = this.getCapabilityRegistry()[capability.trim()];
+    return Array.isArray(config?.providers) ? cloneData(config.providers) : [];
   }
 
   resolveChatProvider(providerId) {
@@ -851,7 +845,7 @@ export class ProviderRegistry {
   }
 
   /**
-   * 更新 provider 的用户配置（写 added-models.yaml）
+   * 更新 provider 的用户配置（写 Provider Catalog）
    * 只更新非凭证字段（base_url / api / display_name / auth_type）
    * @param {string} providerId
    * @param {{ base_url?: string, api?: string, display_name?: string, auth_type?: string }} overrides
@@ -871,15 +865,14 @@ export class ProviderRegistry {
   }
 
   /**
-   * 删除一个 provider（仅从 added-models.yaml，内置插件的插件声明保留）
+   * 删除一个 provider（仅从 Provider Catalog 用户配置删除，内置插件声明保留）
    * @param {string} providerId
    */
   remove(providerId) {
     const userConfig = this._loadAddedModels();
     if (!Object.prototype.hasOwnProperty.call(userConfig, providerId)) return;
     delete userConfig[providerId];
-    const existing = safeReadYAMLSync(path.join(this._hanakoHome, "added-models.yaml"), {}, YAML) || {};
-    const deletedProviders = normalizeDeletedProviders(existing[DELETED_PROVIDERS_KEY]);
+    const deletedProviders = this._catalog.getDeletedProviders();
     if (!deletedProviders.includes(providerId)) deletedProviders.push(providerId);
     this._saveAddedModels(userConfig, { deletedProviders });
     this._entries.delete(providerId);
@@ -925,7 +918,7 @@ export class ProviderRegistry {
 
   /**
    * 读取 provider 的凭证信息（apiKey, baseUrl, api）
-   * 从 added-models.yaml 读取用户配置值，baseUrl/api 不存在时回退到插件默认值。
+   * 从 Provider Catalog 读取用户配置值，baseUrl/api 不存在时回退到插件默认值。
    * OAuth provider 若 YAML 无 api_key，自动从 auth.json 补全 access token；
    * 若 auth.json 含 resourceUrl 且 YAML 未配 base_url，用 resourceUrl 作为 baseUrl。
    * @param {string} providerId
@@ -1011,7 +1004,7 @@ export class ProviderRegistry {
   }
 
   /**
-   * 读取某 provider 在 added-models.yaml 中的模型 ID 列表
+   * 读取某 provider 在 Provider Catalog 中的模型 ID 列表
    * 模型条目可以是字符串或 {id, name?, context?, maxOutput?} 对象，统一提取 id
    * @param {string} providerId
    * @returns {string[]}
@@ -1024,7 +1017,7 @@ export class ProviderRegistry {
   }
 
   /**
-   * 返回 added-models.yaml 的原始数据（不经过插件合并）
+   * 返回 Provider Catalog 的原始 provider 数据（不经过插件合并）
    * @returns {Record<string, any>}
    */
   getAllProvidersRaw() {
@@ -1121,7 +1114,7 @@ export class ProviderRegistry {
    * 裸字符串条目会被升级为对象
    * @param {string} providerId
    * @param {string} modelId
-   * @param {{ name?: string, context?: number, maxOutput?: number, image?: boolean, video?: boolean, reasoning?: boolean, defaultThinkingLevel?: string, compat?: object, visionCapabilities?: object }} meta
+   * @param {{ name?: string, context?: number, maxOutput?: number, image?: boolean, video?: boolean, reasoning?: boolean, defaultThinkingLevel?: string, compat?: object, toolUse?: object, visionCapabilities?: object }} meta
    */
   updateModelEntry(providerId, modelId, meta) {
     const userConfig = this._loadAddedModels();
@@ -1144,6 +1137,11 @@ export class ProviderRegistry {
     }
     const compat = normalizeModelProtocolCompat(meta?.compat);
     if (compat) safe.compat = compat;
+    const toolUse = normalizeToolUseContract(meta?.toolUse);
+    if (meta?.toolUse !== undefined && !toolUse) {
+      throw new Error(`invalid toolUse contract for model "${modelId}"`);
+    }
+    if (toolUse) safe.toolUse = toolUse;
     const visionCapabilities = normalizeVisionCapabilities(meta?.visionCapabilities);
     if (visionCapabilities) safe.visionCapabilities = visionCapabilities;
 
@@ -1248,7 +1246,7 @@ export class ProviderRegistry {
   }
 
   /**
-   * 创建或更新一个 provider 条目（合并写入 added-models.yaml）
+   * 创建或更新一个 provider 条目（合并写入 Provider Catalog）
    * @param {string} providerId
    * @param {Record<string, any>} data - 要写入的字段（api_key, base_url, api, models 等）
    */
@@ -1267,8 +1265,7 @@ export class ProviderRegistry {
 
     validateProviderModels(providerId, nextProvider.models, { baseUrl: nextProvider.base_url });
     userConfig[providerId] = nextProvider;
-    const existing = safeReadYAMLSync(path.join(this._hanakoHome, "added-models.yaml"), {}, YAML) || {};
-    const deletedProviders = normalizeDeletedProviders(existing[DELETED_PROVIDERS_KEY])
+    const deletedProviders = this._catalog.getDeletedProviders()
       .filter((id) => id !== providerId);
     this._saveAddedModels(userConfig, { deletedProviders });
     this._entries.clear();
