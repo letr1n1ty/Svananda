@@ -26,7 +26,7 @@ import { openSettingsModal } from '../stores/settings-modal-actions';
 import type { Agent, StudioWorkspace } from '../types';
 import { AgentAvatar, refreshAgentAvatarVersion, resolveAgentDisplayInfo, type AgentDisplayInfo } from '../utils/agent-display';
 import styles from './Welcome.module.css';
-import { buildWorkspacePickerItems, normalizeWorkspacePath } from '../../../../shared/workspace-history.ts';
+
 
 /* eslint-disable @typescript-eslint/no-explicit-any -- store setState 回调 (s: any) */
 
@@ -393,12 +393,6 @@ function FolderHistory({ cwdHistory, agentHomeFolders, selectedFolder, selectedW
   onRemoveWorkspaceFolder: (folder: string) => void;
   onRemoveStudioWorkspace: (mountId: string) => void;
 }) {
-  const primaryItems: string[] = buildWorkspacePickerItems({
-    selectedFolder,
-    homeFolder,
-    cwdHistory: [...agentHomeFolders, ...cwdHistory],
-  });
-  const removableHistory = new Set(cwdHistory.map(normalizeWorkspacePath).filter(Boolean));
   const t = window.t ?? ((p: string) => p);
   return (
     <div className={styles.folderHistory}>
@@ -447,44 +441,6 @@ function FolderHistory({ cwdHistory, agentHomeFolders, selectedFolder, selectedW
                 disabled
                 title="需切換至其他工作台方可解除掛載"
                 style={{ opacity: 0.3, cursor: 'not-allowed' }}
-              >
-                x
-              </button>
-            )}
-          </div>
-        );
-      })}
-      {primaryItems.map(p => {
-        const name = p.split('/').pop() || p;
-        const isActive = p === selectedFolder;
-        return (
-          <div
-            key={p}
-            className={`${styles.folderHistoryItem}${isActive ? ` ${styles.folderHistoryItemActive}` : ''}`}
-            title={p}
-            onClick={(e) => { e.stopPropagation(); onSelect(p); }}
-          >
-            <span className={styles.folderHistoryItemIcon}>
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
-              </svg>
-            </span>
-            <span className={styles.folderHistoryItemName}>{name}</span>
-            {removableHistory.has(normalizeWorkspacePath(p)) && (
-              <button
-                type="button"
-                className={styles.folderHistoryRemove}
-                onPointerDown={(e) => {
-                  e.stopPropagation();
-                  e.preventDefault();
-                  onRemoveRecentWorkspace(p);
-                }}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  e.preventDefault();
-                }}
-                title={t('input.removeRecentWorkspace')}
-                aria-label={t('input.removeRecentWorkspace')}
               >
                 x
               </button>
