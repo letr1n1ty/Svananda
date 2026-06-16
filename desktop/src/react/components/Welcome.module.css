@@ -107,6 +107,7 @@
 }
 
 .folderHistoryItem {
+    position: relative;
     display: flex;
     align-items: center;
     gap: 0.35rem;
@@ -153,7 +154,7 @@
 .folderHistoryRemove {
     width: 20px;
     height: 20px;
-    display: inline-flex;
+    display: none;
     align-items: center;
     justify-content: center;
     flex-shrink: 0;
@@ -163,6 +164,11 @@
     color: var(--text-muted);
     cursor: default;
     font: inherit;
+    pointer-events: auto;
+}
+
+.folderHistoryItem:hover .folderHistoryRemove {
+    display: inline-flex;
 }
 
 .folderHistoryRemove:hover {

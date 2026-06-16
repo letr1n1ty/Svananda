@@ -425,9 +425,14 @@ function FolderHistory({ cwdHistory, agentHomeFolders, selectedFolder, selectedW
               <button
                 type="button"
                 className={styles.folderHistoryRemove}
+                onPointerDown={(e) => {
+                  e.stopPropagation();
+                  e.preventDefault();
+                  onRemoveStudioWorkspace(workspace.mountId);
+                }}
                 onClick={(e) => {
                   e.stopPropagation();
-                  onRemoveStudioWorkspace(workspace.mountId);
+                  e.preventDefault();
                 }}
                 title={t('input.removeWorkspace') || 'Remove Workspace'}
                 aria-label={t('input.removeWorkspace')}
@@ -469,9 +474,14 @@ function FolderHistory({ cwdHistory, agentHomeFolders, selectedFolder, selectedW
               <button
                 type="button"
                 className={styles.folderHistoryRemove}
+                onPointerDown={(e) => {
+                  e.stopPropagation();
+                  e.preventDefault();
+                  onRemoveRecentWorkspace(p);
+                }}
                 onClick={(e) => {
                   e.stopPropagation();
-                  onRemoveRecentWorkspace(p);
+                  e.preventDefault();
                 }}
                 title={t('input.removeRecentWorkspace')}
                 aria-label={t('input.removeRecentWorkspace')}
@@ -515,9 +525,14 @@ function FolderHistory({ cwdHistory, agentHomeFolders, selectedFolder, selectedW
             <button
               type="button"
               className={styles.folderHistoryRemove}
+              onPointerDown={(e) => {
+                e.stopPropagation();
+                e.preventDefault();
+                onRemoveWorkspaceFolder(p);
+              }}
               onClick={(e) => {
                 e.stopPropagation();
-                onRemoveWorkspaceFolder(p);
+                e.preventDefault();
               }}
               title={(window.t ?? ((key: string) => key))('common.remove')}
             >

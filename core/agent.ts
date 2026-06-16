@@ -41,6 +41,8 @@ import { createStopTaskTool } from "../lib/tools/stop-task-tool.ts";
 import { createCurrentStatusTool } from "../lib/tools/current-status-tool.ts";
 import { createTerminalTool } from "../lib/tools/terminal-tool.ts";
 import { createWorkflowTool } from "../lib/tools/workflow-tool.ts";
+import { loadSvanandaPersona } from "./agent-svananda-persona.ts";
+import { buildSvanandaConsolidatedMemory } from "./agent-svananda-memory.ts";
 import { runCompatChecks } from "../lib/compat/index.ts";
 import { getPlatformPromptNote } from "./platform-prompt.ts";
 import { assertAgentConfigPatchYuan, getAgentConfigRepairState } from "./yuan-registry.ts";
@@ -1017,8 +1019,6 @@ export class Agent {
       .replace(/\{\{agentName\}\}/g, this.agentName)
       .replace(/\{\{agentId\}\}/g, this.id);
       
-    // Svananda: 引入全新的單一聲明式加載器，但目前先保留舊版相容性
-    const { loadSvanandaPersona } = require('./agent-svananda-persona.ts');
     const rawPersona = loadSvanandaPersona(this.agentDir, this.productDir, isZh ? "zh" : "en");
     
     return fill(rawPersona);
@@ -1085,7 +1085,6 @@ export class Agent {
     const pinnedMd = readFile(path.join(this.agentDir, "pinned.md")).trim();
     
     // Svananda: 讀取 Consolidated Memory 取代原本破碎的 memoryMdPath
-    const { buildSvanandaConsolidatedMemory } = require('./agent-svananda-memory.ts');
     const memoryMd = buildSvanandaConsolidatedMemory(this.agentDir);
     
     const hasMemory = memoryMd && memoryMd !== "（暂无记忆）" && memoryMd !== "（暫無記憶）" && memoryMd !== "(No memory yet)";
@@ -1151,7 +1150,6 @@ export class Agent {
     const pinnedMd = readFile(path.join(this.agentDir, "pinned.md"));
     
     // Svananda: 讀取 Consolidated Memory
-    const { buildSvanandaConsolidatedMemory } = require('./agent-svananda-memory.ts');
     const memory = buildSvanandaConsolidatedMemory(this.agentDir);
 
     // 构建 section 分隔格式的 prompt

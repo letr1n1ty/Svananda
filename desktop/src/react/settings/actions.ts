@@ -323,7 +323,7 @@ export async function loadPluginSettings() {
 
 export async function browseAgent(agentId: string) {
   useSettingsStore.setState({ settingsAgentId: agentId });
-  await loadSettingsConfig();
+  await loadSettingsSnapshot();
   await loadAgents();
 }
 
@@ -343,7 +343,7 @@ export async function switchToAgent(agentId: string) {
       currentAgentId: data.agent.id,
       agentName: data.agent.name,
     });
-    await loadSettingsConfig();
+    await loadSettingsSnapshot();
     await loadAgents();
     store.showToast(t('settings.agent.switched', { name: data.agent.name }), 'success');
   } catch (err: any) {

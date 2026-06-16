@@ -164,7 +164,9 @@ const targetEnv = {
   PATH: `${targetNodeDir}${path.delimiter}${process.env.PATH}`,
 };
 function runWithTargetNode(cmd, opts = {}) {
-  execSync(`"${cachedNodeBin}" ${cmd}`, {
+  // 繞過根節點 cache EPERM 權限問題
+  const cleanCmd = cmd.includes("install") ? `${cmd} --cache=/tmp/npm-cache-temp` : cmd;
+  execSync(`"${cachedNodeBin}" ${cleanCmd}`, {
     cwd: outDir,
     stdio: "inherit",
     env: targetEnv,
