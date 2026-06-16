@@ -92,6 +92,17 @@ export function SelectWidget({
         : { top: rect.bottom + offset }),
       zIndex: 9999,
     });
+
+    // 等待 Panel 渲染後，將已選中的項目捲動到可視範圍中心
+    if (panelRef.current) {
+      setTimeout(() => {
+        if (!panelRef.current) return;
+        const selectedEl = panelRef.current.querySelector('[data-selected="true"]');
+        if (selectedEl) {
+          selectedEl.scrollIntoView({ block: 'center' });
+        }
+      }, 0);
+    }
   }, [open, align, offset, popupMinWidth, placement]);
 
   useEffect(() => {
@@ -149,6 +160,7 @@ export function SelectWidget({
         key={group ? `${group}/${item.value}` : item.value}
         role="option"
         aria-selected={selected}
+        data-selected={selected}
         className={[
           styles.option,
           selected && styles.selected,

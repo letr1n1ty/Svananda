@@ -623,6 +623,14 @@ export function createAgentsRoute(engine) {
       return c.json({ error: "agent not found" }, 404);
     }
     try {
+      const fsSync = require("fs");
+      const yamlPath = path.join(agentDir(engine, id), "svananda.yaml");
+      if (fsSync.existsSync(yamlPath)) {
+        const yamlData = require("js-yaml").load(await fs.readFile(yamlPath, "utf-8")) as any;
+        if (yamlData && yamlData.identity) {
+          return c.json({ content: yamlData.identity });
+        }
+      }
       const content = await fs.readFile(path.join(agentDir(engine, id), "identity.md"), "utf-8");
       return c.json({ content });
     } catch (err) {
@@ -642,6 +650,16 @@ export function createAgentsRoute(engine) {
       if (typeof content !== "string") {
         return c.json({ error: "content must be a string" }, 400);
       }
+      
+      const fsSync = require("fs");
+      const yamlPath = path.join(agentDir(engine, id), "svananda.yaml");
+      if (fsSync.existsSync(yamlPath)) {
+        const yamlModule = require("js-yaml");
+        const yamlData = yamlModule.load(await fs.readFile(yamlPath, "utf-8")) || {} as any;
+        yamlData.identity = content;
+        await fs.writeFile(yamlPath, yamlModule.dump(yamlData), "utf-8");
+      }
+      
       await fs.writeFile(path.join(agentDir(engine, id), "identity.md"), content, "utf-8");
       engine.invalidateAgentListCache();
       await engine.updateConfig({}, { agentId: id, refreshDescription: true });
@@ -662,6 +680,14 @@ export function createAgentsRoute(engine) {
       return c.json({ error: "agent not found" }, 404);
     }
     try {
+      const fsSync = require("fs");
+      const yamlPath = path.join(agentDir(engine, id), "svananda.yaml");
+      if (fsSync.existsSync(yamlPath)) {
+        const yamlData = require("js-yaml").load(await fs.readFile(yamlPath, "utf-8")) as any;
+        if (yamlData && yamlData.consciousness) {
+          return c.json({ content: yamlData.consciousness });
+        }
+      }
       const content = await fs.readFile(path.join(agentDir(engine, id), "ishiki.md"), "utf-8");
       return c.json({ content });
     } catch (err) {
@@ -681,6 +707,16 @@ export function createAgentsRoute(engine) {
       if (typeof content !== "string") {
         return c.json({ error: "content must be a string" }, 400);
       }
+      
+      const fsSync = require("fs");
+      const yamlPath = path.join(agentDir(engine, id), "svananda.yaml");
+      if (fsSync.existsSync(yamlPath)) {
+        const yamlModule = require("js-yaml");
+        const yamlData = yamlModule.load(await fs.readFile(yamlPath, "utf-8")) || {} as any;
+        yamlData.consciousness = content;
+        await fs.writeFile(yamlPath, yamlModule.dump(yamlData), "utf-8");
+      }
+      
       await fs.writeFile(path.join(agentDir(engine, id), "ishiki.md"), content, "utf-8");
       await engine.updateConfig({}, { agentId: id, refreshDescription: true });
       emitAppEvent(engine, "agent-updated", { agentId: id });

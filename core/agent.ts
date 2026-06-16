@@ -1016,40 +1016,18 @@ export class Agent {
       .replace(/\{\{userName\}\}/g, this.userName)
       .replace(/\{\{agentName\}\}/g, this.agentName)
       .replace(/\{\{agentId\}\}/g, this.id);
-    const readFile = (p) => safeReadFile(p, "");
-    const langDir = isZh ? "" : "en/";
-    const yuanType = this._config?.agent?.yuan || "hanako";
-    const identityMd = readFile(path.join(this.agentDir, "identity.md"))
-      || readFile(path.join(this.productDir, "identity-templates", `${langDir}${yuanType}.md`))
-      || readFile(path.join(this.productDir, "identity-templates", `${yuanType}.md`))
-      || readFile(path.join(this.productDir, "identity.example.md"));
-    const yuanMd = this._readYuan();
-    const ishikiMd = readFile(path.join(this.agentDir, "ishiki.md"))
-      || readFile(path.join(this.productDir, "ishiki-templates", `${langDir}${yuanType}.md`))
-      || readFile(path.join(this.productDir, "ishiki-templates", `${yuanType}.md`))
-      || readFile(path.join(this.productDir, "ishiki.example.md"));
-    return fill(identityMd) + "\n\n" + fill(yuanMd || "") + "\n\n" + fill(ishikiMd);
+      
+    // Svananda: 引入全新的單一聲明式加載器，但目前先保留舊版相容性
+    const { loadSvanandaPersona } = require('./agent-svananda-persona.ts');
+    const rawPersona = loadSvanandaPersona(this.agentDir, this.productDir, isZh ? "zh" : "en");
+    
+    return fill(rawPersona);
   }
 
   /** 返回花名册描述生成用的人格来源，不包含 yuan 输出协议。 */
   get descriptionSource() {
-    const isZh = String(this._config.locale || "").startsWith("zh");
-    const fill = (text) => text
-      .replace(/\{\{userName\}\}/g, this.userName)
-      .replace(/\{\{agentName\}\}/g, this.agentName)
-      .replace(/\{\{agentId\}\}/g, this.id);
-    const readFile = (p) => safeReadFile(p, "");
-    const langDir = isZh ? "" : "en/";
-    const yuanType = this._config?.agent?.yuan || "hanako";
-    const identityMd = readFile(path.join(this.agentDir, "identity.md"))
-      || readFile(path.join(this.productDir, "identity-templates", `${langDir}${yuanType}.md`))
-      || readFile(path.join(this.productDir, "identity-templates", `${yuanType}.md`))
-      || readFile(path.join(this.productDir, "identity.example.md"));
-    const ishikiMd = readFile(path.join(this.agentDir, "ishiki.md"))
-      || readFile(path.join(this.productDir, "ishiki-templates", `${langDir}${yuanType}.md`))
-      || readFile(path.join(this.productDir, "ishiki-templates", `${yuanType}.md`))
-      || readFile(path.join(this.productDir, "ishiki.example.md"));
-    return fill(identityMd) + "\n\n" + fill(ishikiMd);
+    // 為了相容性，這裡直接複用 personality，因為 Svananda yaml 已經整合
+    return this.personality;
   }
 
   /** 读取 yuan 模板（能力定义） */
@@ -1105,8 +1083,12 @@ export class Agent {
     const readFile = (filePath) => safeReadFile(filePath, "");
 
     const pinnedMd = readFile(path.join(this.agentDir, "pinned.md")).trim();
-    const memoryMd = readFile(this.memoryMdPath).trim();
-    const hasMemory = memoryMd && memoryMd !== "（暂无记忆）" && memoryMd !== "(No memory yet)";
+    
+    // Svananda: 讀取 Consolidated Memory 取代原本破碎的 memoryMdPath
+    const { buildSvanandaConsolidatedMemory } = require('./agent-svananda-memory.ts');
+    const memoryMd = buildSvanandaConsolidatedMemory(this.agentDir);
+    
+    const hasMemory = memoryMd && memoryMd !== "（暂无记忆）" && memoryMd !== "（暫無記憶）" && memoryMd !== "(No memory yet)";
     const existingMemory = memoryEnabled
       ? [
         pinnedMd
@@ -1167,7 +1149,10 @@ export class Agent {
     // 可选文件
     const userMd = readFile(userProfilePath(this.userDir));
     const pinnedMd = readFile(path.join(this.agentDir, "pinned.md"));
-    const memory = readFile(this.memoryMdPath);
+    
+    // Svananda: 讀取 Consolidated Memory
+    const { buildSvanandaConsolidatedMemory } = require('./agent-svananda-memory.ts');
+    const memory = buildSvanandaConsolidatedMemory(this.agentDir);
 
     // 构建 section 分隔格式的 prompt
     const section = (title, content) => ["", "---", "", title, "", content];
@@ -1182,8 +1167,8 @@ export class Agent {
     // 叙事顺序上先告诉模型"用户是谁"，再告诉它"你是谁、你和用户什么关系"。
     const parts = [
       isZh
-        ? "你运行在 HanaAgent 平台上（原名 OpenHanako），由 liliMozi 开发。项目主页：https://github.com/liliMozi/openhanako"
-        : "You are running on the HanaAgent platform (formerly OpenHanako), developed by liliMozi. Project page: https://github.com/liliMozi/openhanako",
+        ? "Svananda作為Agent。與本地系統深度集成，並擁有完整的文件讀寫、終端機執行與瀏覽器操作工具。請像一個真正的本地開發夥伴一樣思考與行動。"
+        : "Svananda operates as the Agent. Deeply integrated with the local system, possessing full file system, terminal execution, and browser tools. Please think and act like a true local development partner.",
     ];
     const platformPrompt = getPlatformPromptNote({ platform: process.platform });
     if (platformPrompt) {
@@ -1371,24 +1356,6 @@ export class Agent {
         "**Do not** launch the browser when web_search or web_fetch can do the job. Browser startup is expensive and opens a window that interrupts the user."
     );
 
-    // 主动技能获取引导（仅在 allow_github_fetch 开启时注入）
-    // learn_skills 从全局 preferences 读取
-    const learnCfg = this._cb?.getLearnSkills?.() || this._config?.capabilities?.learn_skills || {};
-    if (learnCfg.enabled && learnCfg.allow_github_fetch) {
-      parts.push(isZh
-        ? "\n## 主动技能获取\n\n" +
-          "遇到专业领域任务且你没有对应技能时，主动搜索并安装：\n" +
-          "- 搜索：`site:clawhub.ai {关键词}` 或 `site:github.com/openclaw/skills {关键词}`，或其他含 SKILL.md 的 GitHub 仓库；用 install_skill 的 github_url 参数安装\n" +
-          "- 判断：仅专业任务搜（日常对话不搜），安装应能显著提升输出质量；已有相关技能则直接用，不重复搜\n" +
-          "- 行为：找到后简要告知用户，直接安装并应用；安装失败则自己完成；搜索无果正常完成，不反复尝试"
-        : "\n## Proactive Skill Acquisition\n\n" +
-          "When you encounter specialized tasks and lack a matching skill, proactively search and install one:\n" +
-          "- Search: `site:clawhub.ai {keywords}` or `site:github.com/openclaw/skills {keywords}`, or other GitHub repos containing SKILL.md; install via install_skill's github_url parameter\n" +
-          "- When: only for specialized domain tasks (not daily conversations), and only if it significantly improves output quality; if you already have a relevant skill, use it directly without searching again\n" +
-          "- Behavior: briefly inform the user, install, and apply immediately; if installation fails, do the task yourself; if nothing is found, complete normally without retrying"
-      );
-    }
-
     // 团队协作（仅当存在其他 agent 时注入）
     // Subagent 场景下跳过：subagent 没有 subagent 工具，知道其他 agent 也使不上
     if (!forSubagent) {
@@ -1412,6 +1379,25 @@ export class Agent {
     // ── cache 分界线 ──
     // 以下内容会在不同 session 之间变化（用户档案编辑、cwd 切换、记忆更新、时间戳推进），
     // 统一放在 prompt 末尾以保护前面静态前缀的 cache 命中率。
+
+    // 主动技能获取引导（仅在 allow_github_fetch 开启时注入）
+    // learn_skills 从全局 preferences 读取
+    // 移动到 cache 分界线后，因为其是否启用属于用户偏好配置，容易变动且并非对所有会话都是核心静态内容。
+    const learnCfg = this._cb?.getLearnSkills?.() || this._config?.capabilities?.learn_skills || {};
+    if (learnCfg.enabled && learnCfg.allow_github_fetch) {
+      parts.push(isZh
+        ? "\n## 主动技能获取\n\n" +
+          "遇到专业领域任务且你没有对应技能时，主动搜索并安装：\n" +
+          "- 搜索：`site:clawhub.ai {关键词}` 或 `site:github.com/openclaw/skills {关键词}`，或其他含 SKILL.md 的 GitHub 仓库；用 install_skill 的 github_url 参数安装\n" +
+          "- 判断：仅专业任务搜（日常对话不搜），安装应能显著提升输出质量；已有相关技能则直接用，不重复搜\n" +
+          "- 行为：找到后简要告知用户，直接安装并应用；安装失败则自己完成；搜索无果正常完成，不反复尝试"
+        : "\n## Proactive Skill Acquisition\n\n" +
+          "When you encounter specialized tasks and lack a matching skill, proactively search and install one:\n" +
+          "- Search: `site:clawhub.ai {keywords}` or `site:github.com/openclaw/skills {keywords}`, or other GitHub repos containing SKILL.md; install via install_skill's github_url parameter\n" +
+          "- When: only for specialized domain tasks (not daily conversations), and only if it significantly improves output quality; if you already have a relevant skill, use it directly without searching again\n" +
+          "- Behavior: briefly inform the user, install, and apply immediately; if installation fails, do the task yourself; if nothing is found, complete normally without retrying"
+      );
+    }
 
     // 用户档案（user.md）
     const configuredUserName = typeof this._config?.user?.name === "string"

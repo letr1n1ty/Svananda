@@ -67,6 +67,19 @@ export function listStudioMountsForStudio(hanakoHome, hostStudioId) {
     .map(clonePlain);
 }
 
+export function removeStudioMount(hanakoHome, mountId) {
+  if (!isNonEmptyString(mountId)) throw new Error("mountId required");
+  const registry = loadStudioMountRegistry(hanakoHome);
+  const initialLength = registry.mounts.length;
+  registry.mounts = registry.mounts.filter((m) => m.mountId !== mountId);
+  if (registry.mounts.length !== initialLength) {
+    registry.updatedAt = new Date().toISOString();
+    writeJsonAtomic(path.join(hanakoHome, STUDIO_MOUNTS_FILE), registry);
+    return true;
+  }
+  return false;
+}
+
 export function validateStudioMountRegistry(value) {
   if (!isPlainObject(value)) throw new Error(`invalid ${STUDIO_MOUNTS_FILE}: expected object`);
   if (value.schemaVersion !== SCHEMA_VERSION) throw new Error(`invalid ${STUDIO_MOUNTS_FILE}: schemaVersion must be 1`);

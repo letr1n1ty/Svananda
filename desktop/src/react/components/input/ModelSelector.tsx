@@ -161,15 +161,6 @@ export function ModelSelector({ models, sessionModel, isStreaming = false }: {
       popupMinWidth={180}
       popupClassName={selectWidgetStyles.providerInset}
       triggerBare
-      onAttemptOpen={() => {
-        if (isStreaming) {
-          useStore.getState().addToast(t('model.switchWhileStreaming'), 'warning', 4000, {
-            dedupeKey: 'model-switch-streaming',
-          });
-          return false;
-        }
-        return true;
-      }}
       triggerClassName={`${styles['model-pill']}${loading ? ` ${styles['model-pill-disabled']}` : ''}`}
       renderTrigger={() => (
         <>

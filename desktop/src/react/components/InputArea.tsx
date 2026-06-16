@@ -1183,8 +1183,8 @@ function InputAreaInner({ surface }: Required<InputAreaProps>) {
     || editorHasInlineNode(editor, 'fileBadge');
   // capabilityRefreshing / compacting：压缩到 reload 完成之间 session 没有可用
   // runtime，此窗口内发 prompt 会冷建第二个 runtime 与 reload 竞争（#1624 I2）。
-  const canSend = hasContent && connected && !isStreaming && !modelSwitching && !pendingSessionSwitchPath && !inputLocked
-    && !capabilityRefreshing && !compacting;
+  const canSend = hasContent && connected && !modelSwitching && !pendingSessionSwitchPath && !inputLocked
+    && !capabilityRefreshing && !compacting && (!isStreaming || inputText.trim().startsWith('/goal ') || inputText.trim().startsWith('- '));
 
   const loadVisionAuxiliaryConfig = useCallback(async () => {
     if (surface === 'mobile') {
@@ -1315,7 +1315,19 @@ function InputAreaInner({ surface }: Required<InputAreaProps>) {
     if (inputLocked) return;
     slashDismissedTextRef.current = null;
     if (item.type === 'builtin') {
-      item.execute();
+      try {
+        item.execute();
+      } catch (err: any) {
+        if (err.message && err.message.startsWith("insert_text_only:")) {
+          const textToInsert = err.message.split(":")[1];
+          if (editor) {
+            editor.chain().clearContent().insertContent(textToInsert).focus('end').run();
+            setSlashMenuOpen(false);
+          }
+        } else {
+          throw err;
+        }
+      }
       return;
     }
     if (!editor) return;
@@ -1603,8 +1615,56 @@ function InputAreaInner({ surface }: Required<InputAreaProps>) {
   }, [editor, inputLocked, attachedFiles, docContextAttached, connected, isStreaming, sending, pendingNewSession, currentDoc, clearAttachedFiles, clearDraft, currentSessionPath, setDocContextAttached, slashCommands, slashSelected, handleSlashSelect, supportsVision, currentModelInfo, loadVisionAuxiliaryConfig, modelSwitching, t]);
 
   const handleSend = useCallback(async () => {
+    // Svananda: 忙碌時排隊邏輯 (Queue Mode)
+    if (isStreaming || sending) {
+      if (!inputText.trim().startsWith('/goal ') && !inputText.trim().startsWith('- ')) {
+        return; // 一般訊息不排隊，由 Button 狀態擋下，或在這裡阻擋
+      }
+      
+      const sessionPathForSend = useStore.getState().currentSessionPath;
+      if (!sessionPathForSend) return;
+
+      const ws = getWebSocket();
+      if (!ws) return;
+
+      // 擷取輸入的內容作為 Todo，並加上 Svananda 專屬的 Quiet Mode 標籤
+      const rawText = inputText.trim();
+      const todoContent = rawText.startsWith('/goal ') ? rawText.slice(6).trim() : rawText.slice(2).trim();
+      if (!todoContent) return;
+
+      setSending(true);
+      try {
+        const wsMsg = {
+          type: 'execute_tool',
+          sessionPath: sessionPathForSend,
+          id: `queue_${Date.now()}`,
+          name: 'todo_write',
+          params: {
+            todos: [
+              {
+                content: todoContent,
+                activeForm: `[Queued] ${todoContent}`,
+                status: 'pending'
+              }
+            ]
+          }
+        };
+        ws.send(JSON.stringify(wsMsg));
+
+        // 清空輸入框
+        if (editor) {
+          editor.chain().clearContent().run();
+        }
+        clearAttachedFiles();
+        useStore.getState().addToast('任務已加入排隊隊列', 'info');
+      } finally {
+        setSending(false);
+      }
+      return;
+    }
+
     await submitEditorMessage('prompt');
-  }, [submitEditorMessage]);
+  }, [submitEditorMessage, isStreaming, sending, inputText, editor, clearAttachedFiles]);
 
   // ── Steer ──
   const handleSteer = useCallback(async () => {

@@ -3,12 +3,12 @@ import os from "os";
 import path from "path";
 
 export function resolveCliHanaHome(env = process.env) {
-  return resolveHomePath(env.HANA_HOME || path.join(os.homedir(), ".hanako"));
+  return resolveHomePath(env.HANA_HOME || path.join(os.homedir(), ".svananda"));
 }
 
 function resolveHomePath(value) {
   const raw = String(value || "").trim();
-  if (!raw) return path.join(os.homedir(), ".hanako");
+  if (!raw) return path.join(os.homedir(), ".svananda");
   if (raw === "~") return os.homedir();
   if (raw.startsWith(`~${path.sep}`) || raw.startsWith("~/")) {
     return path.resolve(path.join(os.homedir(), raw.slice(2)));

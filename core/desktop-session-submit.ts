@@ -28,6 +28,7 @@ import { collectMediaItems } from "../lib/tools/media-details.ts";
 import { formatSettingsUpdateText } from "../lib/tools/settings-update-result.ts";
 import { materializeBridgeInboundFiles } from "../lib/session-files/bridge-inbound-files.ts";
 import { serializeSessionFile } from "../lib/session-files/session-file-response.ts";
+import { extractLatestTodosFromEntries } from "../lib/tools/todo-compat.ts";
 
 /**
  * 非桌面来源（bridge /rc 等）用户消息的来源元信息持久化条目类型。
@@ -244,6 +245,42 @@ export async function submitDesktopSessionMessage(engine: any, opts: {
     } finally {
       try { unsub?.(); } catch {}
       engine.emitEvent?.({ type: "session_status", isStreaming: false }, sessionPath);
+    }
+
+    // Auto-Pilot /goal 自動迴圈檢查
+    const isAutoPilot = !!context?.autoPilot || promptText.trim().startsWith("/goal");
+    let nextAutoPilotStep = false;
+    
+    if (isAutoPilot) {
+      try {
+        const entries = session.sessionManager.getEntries();
+        const latestTodos = extractLatestTodosFromEntries(entries);
+        if (latestTodos && Array.isArray(latestTodos)) {
+          const hasUnfinished = latestTodos.some(td => td.status === "pending" || td.status === "in_progress");
+          if (hasUnfinished) {
+             nextAutoPilotStep = true;
+          }
+        }
+      } catch (err) {
+        console.warn(`[desktop-session-submit] auto-pilot check failed:`, err);
+      }
+    }
+
+    if (nextAutoPilotStep) {
+      // 延遲 1.5 秒讓 UI 更新，然後自動注入下一輪背景喚醒指令
+      setTimeout(() => {
+        // 確保 session 未被中斷 (如果使用者按了 Stop，Session 的 isStreaming 會停掉，但我們也要防呆)
+        if (typeof engine.isSessionStreaming === "function" && engine.isSessionStreaming(sessionPath)) return;
+        
+        console.log(`[desktop-session-submit] Auto-Pilot triggering next step for ${sessionPath}`);
+        submitDesktopSessionMessage(engine, {
+          sessionPath,
+          text: "[System: Auto-Pilot Mode] 請自動推進下一個待辦步驟。如果是 pending 任務請轉換為 in_progress 進行；如果是尚未完成的 in_progress 請繼續處理。不要等我確認，做完這一步請再次更新 todo 狀態。",
+          context: { ...context, autoPilot: true },
+        }).catch(err => {
+          console.error(`[desktop-session-submit] Auto-Pilot loop error:`, err);
+        });
+      }, 1500);
     }
 
     return {

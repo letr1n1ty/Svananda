@@ -6,6 +6,7 @@ import { MountAwareFileError, MountAwareFileService } from "../../core/mount-awa
 import {
   listStudioMountsForStudio,
   upsertStudioMount,
+  removeStudioMount,
 } from "../../core/studio-mounts.ts";
 import { safeJson } from "../hono-helpers.ts";
 import { createRequestContext } from "../http/boundary.ts";
@@ -64,6 +65,41 @@ export function createStudioWorkspacesRoute(engine) {
         ok: true,
         workspace,
       });
+    } catch (err) {
+      return workspaceError(c, err);
+    }
+  });
+
+  route.delete("/studio/workspaces/:mountId", async (c) => {
+    const auth = authorizeStudioWorkspace(c, engine, "files.write");
+    if (auth.response) return auth.response;
+    if (!isLocalOwnerPrincipal(auth.requestContext?.authPrincipal)) {
+      return c.json({
+        error: "local_owner_required",
+        capability: "studio.workspace.remove_local_path",
+      }, 403);
+    }
+
+    try {
+      const mountId = c.req.param("mountId");
+      if (!mountId || mountId === "default") {
+        return c.json({ error: "cannot_remove_default_mount" }, 400);
+      }
+      
+      const removed = removeStudioMount(engine.hanakoHome, mountId);
+      
+      recordSecurityAuditEvent(c, engine, {
+        action: "studio_workspace.remove_local_path",
+        target: {
+          kind: "studio",
+          studioId: auth.requestContext?.studioId || null,
+          mountId: mountId,
+        },
+        result: removed ? "success" : "not_found",
+        decision: auth.decision || null,
+      } as any);
+
+      return c.json({ ok: removed });
     } catch (err) {
       return workspaceError(c, err);
     }

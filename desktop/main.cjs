@@ -98,7 +98,7 @@ const {
   renderScreenshotCodeArticle,
 } = require("./src/shared/screenshot-markdown.cjs");
 
-const APP_USER_MODEL_ID = "com.hanako.app"; // Keep in sync with package.json build.appId.
+const APP_USER_MODEL_ID = "com.svananda.app"; // Keep in sync with package.json build.appId.
 
 // preload 缺失时 Electron 会静默忽略，renderer 拿不到 window.hana →
 // onboarding/主窗口白屏且无前端报错。此处硬崩，拒绝以不可用状态启动。
@@ -247,7 +247,7 @@ async function serverEnvironmentForNetworkProxy(baseEnv) {
 // 按 HANA_HOME 隔离 Electron userData（localStorage / cache / session）
 // 生产: ~/Library/Application Support/Hanako（历史目录，随 HanaAgent 显示名保留）
 // 开发: ~/Library/Application Support/Hanako-dev
-const defaultHome = path.join(os.homedir(), ".hanako");
+const defaultHome = path.join(os.homedir(), ".svananda");
 configureClientSingleInstance(app, {
   hanakoHome,
   defaultHome,

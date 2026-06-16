@@ -20,6 +20,7 @@ import {
   loadStudioWorkspaces,
   removeRecentWorkspace,
   removeWorkspaceFolder,
+  removeStudioWorkspace,
 } from '../stores/desk-actions';
 import { openSettingsModal } from '../stores/settings-modal-actions';
 import type { Agent, StudioWorkspace } from '../types';
@@ -369,13 +370,14 @@ function FolderPicker({
           onAddWorkspaceFolder={handleAddWorkspaceFolder}
           onRemoveRecentWorkspace={removeRecentWorkspace}
           onRemoveWorkspaceFolder={removeWorkspaceFolder}
+          onRemoveStudioWorkspace={removeStudioWorkspace}
         />
       )}
     </div>
   );
 }
 
-function FolderHistory({ cwdHistory, agentHomeFolders, selectedFolder, selectedWorkspaceMountId, studioWorkspaces, homeFolder, workspaceFolders, onSelectWorkspace, onSelect, onBrowse, onAddWorkspaceFolder, onRemoveRecentWorkspace, onRemoveWorkspaceFolder }: {
+function FolderHistory({ cwdHistory, agentHomeFolders, selectedFolder, selectedWorkspaceMountId, studioWorkspaces, homeFolder, workspaceFolders, onSelectWorkspace, onSelect, onBrowse, onAddWorkspaceFolder, onRemoveRecentWorkspace, onRemoveWorkspaceFolder, onRemoveStudioWorkspace }: {
   cwdHistory: string[];
   agentHomeFolders: string[];
   selectedFolder: string | null;
@@ -389,6 +391,7 @@ function FolderHistory({ cwdHistory, agentHomeFolders, selectedFolder, selectedW
   onAddWorkspaceFolder: () => void;
   onRemoveRecentWorkspace: (folder: string) => void;
   onRemoveWorkspaceFolder: (folder: string) => void;
+  onRemoveStudioWorkspace: (mountId: string) => void;
 }) {
   const primaryItems: string[] = buildWorkspacePickerItems({
     selectedFolder,
@@ -404,6 +407,7 @@ function FolderHistory({ cwdHistory, agentHomeFolders, selectedFolder, selectedW
       </div>
       {studioWorkspaces.map(workspace => {
         const isActive = workspace.mountId === selectedWorkspaceMountId;
+        const isDefault = workspace.mountId === 'default';
         return (
           <div
             key={`studio:${workspace.mountId}`}
@@ -417,6 +421,31 @@ function FolderHistory({ cwdHistory, agentHomeFolders, selectedFolder, selectedW
               </svg>
             </span>
             <span className={styles.folderHistoryItemName}>{workspace.label}</span>
+            {!isDefault && !isActive && (
+              <button
+                type="button"
+                className={styles.folderHistoryRemove}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onRemoveStudioWorkspace(workspace.mountId);
+                }}
+                title={t('input.removeWorkspace') || 'Remove Workspace'}
+                aria-label={t('input.removeWorkspace')}
+              >
+                x
+              </button>
+            )}
+            {!isDefault && isActive && (
+              <button
+                type="button"
+                className={styles.folderHistoryRemove}
+                disabled
+                title="需切換至其他工作台方可解除掛載"
+                style={{ opacity: 0.3, cursor: 'not-allowed' }}
+              >
+                x
+              </button>
+            )}
           </div>
         );
       })}

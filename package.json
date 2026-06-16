@@ -124,8 +124,8 @@
     "vitest": "^4.0.18"
   },
   "build": {
-    "appId": "com.hanako.app",
-    "productName": "HanaAgent",
+    "appId": "com.svananda.app",
+    "productName": "Svananda",
     "asar": true,
     "npmRebuild": false,
     "afterPack": "./scripts/fix-modules.cjs",
