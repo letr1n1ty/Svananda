@@ -1,14 +1,14 @@
 <p align="center">
-  <img src=".github/assets/banner.jpg" width="100%" alt="HanaAgent Banner">
+  <img src=".github/assets/banner.jpg" width="100%" alt="Svananda Banner">
 </p>
 
 <p align="center">
-  <img src=".github/assets/HanaAgent-280.png" width="80" alt="HanaAgent">
+  <img src=".github/assets/HanaAgent-280.png" width="80" alt="Svananda">
 </p>
 
-<h1 align="center">HanaAgent</h1>
+<h1 align="center">Svananda</h1>
 
-<p align="center">一个有记忆、有灵魂的私人 AI 助理</p>
+<p align="center">一个有记忆、有灵魂的私人 AI 助理 (Forked from HanaAgent/OpenHanako)</p>
 
 <p align="center"><a href="README_EN.md">English</a></p>
 
@@ -17,17 +17,15 @@
 
 ---
 
-## HanaAgent 是什么
+## Svananda 是什么
 
-HanaAgent 是一个更加易用的 AI agent，有记忆，有性格，会主动行动，还能多 Agent 在你的电脑上一同工作。
+Svananda 是基於 HanaAgent/OpenHanako 開發的 Fork 專案。它繼承了 HanaAgent 強大且貼心的 Agent 自主性，並在此基礎上進行了以下獨家優化與特性擴展：
 
-作为助手，Ta 是温柔的：不需要写复杂的配置，不需要理解晦涩的术语。HanaAgent 它不只面向 coder ，而是为每一个坐在电脑前工作的人设计的助手。
-作为工具，Ta 是强大的：记住你说过的每一件事，操作你的电脑，浏览网页，搜索信息，读写文件，执行代码，管理日程，还能自主学习新技能。
-
-我开这个项目的初衷是：弥合绝大多数人和 AI Agent 之间的缝隙，让强大的 Agent 能力不再只局限于命令行里。于是我做了比传统 Coding Agent 更多一些的优化：一方面是强化 Agent「像人」的属性，是你和他们沟通更自然；另一方面，因为我本职也是一介文员，所以我也针对日常办公场景做了很多工具性和流程性的优化，敬请探索。
-此外，HanaAgent 有比较完备的图形页面。
-
-如果你用过 claude code、codex、Manus 等 CLI 或是图形化的 Agent，你会在 HanaAgent 这里找到熟悉又新奇的感觉。
+- **智慧設定檔遷移**：啟動時自動且安全地從舊版 `Hanako`（開發版與正式版）智慧遷移所有的個人設定、API 金鑰與聊天對話歷史，免去首次啟動 Onboarding 畫面，實現完全無縫的資料繼承。
+- **可選式自主 `/goal` 模式**：擴充 `/goal` 任務推進模式：
+  - **完全自主模式 (`/goal! ` 或 `-y` / `--yes`)**：強制 AI 「不提問、不確認、高標準硬性自我驗證」，自主探索 codebase 並在完成前自動執行測試與編譯確認。
+  - **互動參考模式 (`/goal `，預設)**：AI 在面臨關鍵決策或破壞性變更時，會先主動與使用者互動並參考您的意見作為執行約束，再自主推進實作。
+- **獨立品牌更名 (Rebranding)**：全面對齊 `Svananda` 名稱，包含本地數據路徑（`.svananda` 及 `.svananda-dev`）、偏好設定名稱及 UI 中所有語言的文字呈現。
 
 ## 功能特性
 

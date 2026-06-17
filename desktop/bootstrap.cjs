@@ -119,6 +119,132 @@ let hanakoHome = null;
 try {
   const { resolveHanakoHome } = require("../shared/hana-runtime-paths.cjs");
   hanakoHome = resolveHanakoHome(process.env.HANA_HOME);
+
+  function isValidConfigHome(dir) {
+    try {
+      if (!fs.existsSync(dir)) return false;
+      const modelsPath = path.join(dir, "added-models.yaml");
+      if (fs.existsSync(modelsPath)) {
+        const content = fs.readFileSync(modelsPath, "utf-8");
+        if (/api_key:\s*["']?[^"'\s]+/.test(content)) {
+          return true;
+        }
+      }
+      const agentsDir = path.join(dir, "agents");
+      if (fs.existsSync(agentsDir)) {
+        const entries = fs.readdirSync(agentsDir, { withFileTypes: true });
+        for (const entry of entries) {
+          if (entry.isDirectory()) {
+            const configPath = path.join(agentsDir, entry.name, "config.yaml");
+            if (fs.existsSync(configPath)) {
+              const configText = fs.readFileSync(configPath, "utf-8");
+              if (/api_key:\s*["']?[^"'\s]+/.test(configText)) {
+                return true;
+              }
+            }
+          }
+        }
+      }
+    } catch {}
+    return false;
+  }
+
+  function isValidUserData(dir) {
+    try {
+      if (!fs.existsSync(dir)) return false;
+      const prefsPath = path.join(dir, "user", "preferences.json");
+      if (fs.existsSync(prefsPath)) {
+        const content = JSON.parse(fs.readFileSync(prefsPath, "utf-8"));
+        if (content.setupComplete === true) {
+          return true;
+        }
+      }
+    } catch {}
+    return false;
+  }
+
+  // 自動遷移舊版 (Hanako) 或同名正式版 (Svananda) 的設定檔到新版 (Svananda-dev)
+  const targetHomeValid = isValidConfigHome(hanakoHome);
+  if (!targetHomeValid) {
+    const sameHomeProd = hanakoHome.replace(/-dev$/, "");
+    const oldHomeDev = hanakoHome.replace(/svananda/g, "hanako");
+    const oldHomeProd = oldHomeDev.replace(/-dev$/, "");
+
+    let sourceHome = null;
+    if (sameHomeProd !== hanakoHome && isValidConfigHome(sameHomeProd)) {
+      sourceHome = sameHomeProd;
+    } else if (isValidConfigHome(oldHomeDev)) {
+      sourceHome = oldHomeDev;
+    } else if (isValidConfigHome(oldHomeProd)) {
+      sourceHome = oldHomeProd;
+    } else if (sameHomeProd !== hanakoHome && fs.existsSync(sameHomeProd)) {
+      sourceHome = sameHomeProd;
+    } else if (fs.existsSync(oldHomeDev)) {
+      sourceHome = oldHomeDev;
+    } else if (fs.existsSync(oldHomeProd)) {
+      sourceHome = oldHomeProd;
+    }
+
+    if (sourceHome) {
+      try {
+        if (fs.existsSync(hanakoHome)) {
+          fs.rmSync(hanakoHome, { recursive: true, force: true });
+        }
+        fs.cpSync(sourceHome, hanakoHome, { recursive: true });
+        console.log(`[bootstrap] Migrated home from ${sourceHome} to ${hanakoHome}`);
+      } catch (err) {
+        console.error(`[bootstrap] Failed to migrate home from ${sourceHome} to ${hanakoHome}:`, err);
+      }
+    }
+  }
+
+  // 自動遷移偏好設定 userData
+  try {
+    const appData = app.getPath("appData");
+    const suffix = path.basename(hanakoHome).replace(/^\./, "");
+    const appName = suffix.charAt(0).toUpperCase() + suffix.slice(1);
+    const targetUserData = path.join(appData, appName);
+
+    const targetUserDataValid = isValidUserData(targetUserData);
+    if (!targetUserDataValid) {
+      const sameUserDataProd = targetUserData.replace(/-dev$/, "");
+      const oldAppNameDev = appName.replace(/Svananda/g, "Hanako");
+      const oldAppNameProd = oldAppNameDev.replace(/-dev$/, "");
+      
+      const sourceUserDataDev = path.join(appData, oldAppNameDev);
+      const sourceUserDataProd = path.join(appData, oldAppNameProd);
+
+      let sourceUserData = null;
+      if (sameUserDataProd !== targetUserData && isValidUserData(sameUserDataProd)) {
+        sourceUserData = sameUserDataProd;
+      } else if (isValidUserData(sourceUserDataDev)) {
+        sourceUserData = sourceUserDataDev;
+      } else if (isValidUserData(sourceUserDataProd)) {
+        sourceUserData = sourceUserDataProd;
+      } else if (sameUserDataProd !== targetUserData && fs.existsSync(sameUserDataProd)) {
+        sourceUserData = sameUserDataProd;
+      } else if (fs.existsSync(sourceUserDataDev)) {
+        sourceUserData = sourceUserDataDev;
+      } else if (fs.existsSync(sourceUserDataProd)) {
+        sourceUserData = sourceUserDataProd;
+      }
+
+      if (sourceUserData && sourceUserData !== targetUserData) {
+        try {
+          if (fs.existsSync(targetUserData)) {
+            fs.rmSync(targetUserData, { recursive: true, force: true });
+          }
+          fs.cpSync(sourceUserData, targetUserData, { recursive: true });
+          console.log(`[bootstrap] Migrated userData from ${sourceUserData} to ${targetUserData}`);
+        } catch (err) {
+          console.error(`[bootstrap] Failed to migrate userData from ${sourceUserData} to ${targetUserData}:`, err);
+        }
+      }
+    }
+  } catch (err) {
+    console.error("[bootstrap] Failed during userData migration check:", err);
+  }
+
   process.env.HANA_HOME = hanakoHome;
   diagnosticsDir = path.join(hanakoHome, "diagnostics", "desktop-launch");
 } catch (err) {

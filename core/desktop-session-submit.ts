@@ -231,6 +231,43 @@ export async function submitDesktopSessionMessage(engine: any, opts: {
       }
     });
 
+    // Auto-Pilot /goal 自動迴圈與 System Prompt 約束注入
+    const promptTrim = promptText.trim();
+    if (promptTrim.startsWith("/goal!")) {
+      promptText = promptText.replace(/^\/goal!/, "/goal");
+    }
+
+    const isAutoPilot = !!context?.autoPilot || promptTrim.startsWith("/goal");
+    let autoPilotMode = context?.autoPilotMode || "interactive";
+
+    if (promptTrim.startsWith("/goal!") || promptTrim.includes("--yes") || promptTrim.includes("-y")) {
+      autoPilotMode = "full";
+    }
+
+    if (isAutoPilot) {
+      const isFull = autoPilotMode === "full";
+      
+      const autoPilotRules = isFull ? `
+[SYSTEM CONTRACT: AUTO-PILOT MODE (FULL AUTONOMY)]
+你目前正處於「完全自主執行模式（Full Autopilot Mode）」。你必須遵守以下最高指令限制，不得違背：
+1. 嚴禁提問與確認：你必須自主進行技術決策並直接執行。嚴禁以 any 形式向用戶詢問「是否可以執行某個指令」、「需要選擇哪個方案」或「你是否同意此變更」等確認問題。即使面臨不確定性，你必須利用你擁有的工具自主調研、閱讀文件或搜尋 codebase 以做出最合理的決策。
+2. 拒絕草率與敷衍：你必須以最高工程標準完成任務。在將任何 TODO 標記為 completed 之前，你必須自主執行完整的驗證步驟（包括但不限於：編譯程式碼、跑單元測試、檢查命令的 stdout/stderr 輸出結果）。僅當驗證完全通過、結果正確時，才能更新該 TODO 的狀態為 completed。
+3. 主動更新任務清單：請在每次大步驟的末尾或更新時，主動、精確地更新與記錄當前的 TODO 待辦清單，並依此引導推進你的執行。`
+      : `
+[SYSTEM CONTRACT: AUTO-PILOT MODE (INTERACTIVE CONSTRAINTS)]
+你目前正處於「互動參考模式（Interactive Autopilot Mode）」。你必須遵守以下最高指令限制：
+1. 主動參考與確認：在開始執行或面臨多個架構選擇、破壞性變更時，你應該主動提出可能的方案並詢問使用者意見，並將其作為執行約束，而不是完全蒙眼狂奔。
+2. 自主推進與 TODO 管理：雖然在關鍵決策時需要參考使用者意見，但一旦方向確定，你仍應自主執行實作。在將 TODO 標記為 completed 之前，你依然必須自主執行驗證，並精確更新 TODO 清單。`;
+
+      const basePrompt = context?.systemPrompt || session.agent?.state?.systemPrompt || session.systemPrompt || "";
+      context = {
+        ...context,
+        autoPilot: true,
+        autoPilotMode,
+        systemPrompt: basePrompt + "\n" + autoPilotRules,
+      };
+    }
+
     try {
       const promptOpts = buildPromptOptions({
         images,
@@ -248,7 +285,6 @@ export async function submitDesktopSessionMessage(engine: any, opts: {
     }
 
     // Auto-Pilot /goal 自動迴圈檢查
-    const isAutoPilot = !!context?.autoPilot || promptText.trim().startsWith("/goal");
     let nextAutoPilotStep = false;
     
     if (isAutoPilot) {
@@ -276,7 +312,7 @@ export async function submitDesktopSessionMessage(engine: any, opts: {
         submitDesktopSessionMessage(engine, {
           sessionPath,
           text: "[System: Auto-Pilot Mode] 請自動推進下一個待辦步驟。如果是 pending 任務請轉換為 in_progress 進行；如果是尚未完成的 in_progress 請繼續處理。不要等我確認，做完這一步請再次更新 todo 狀態。",
-          context: { ...context, autoPilot: true },
+          context: { ...context, autoPilot: true, autoPilotMode },
         }).catch(err => {
           console.error(`[desktop-session-submit] Auto-Pilot loop error:`, err);
         });

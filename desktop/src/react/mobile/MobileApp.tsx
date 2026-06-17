@@ -378,7 +378,7 @@ function MobileLoadingScreen() {
     <main className="onboarding">
       <section className="onboarding-step active">
         <img className="onboarding-avatar" src="./icon.png" alt="" />
-        <h1 className="onboarding-title">HanaAgent</h1>
+        <h1 className="onboarding-title">Svananda</h1>
         <p className="onboarding-subtitle">{t('mobile.loading')}</p>
       </section>
     </main>

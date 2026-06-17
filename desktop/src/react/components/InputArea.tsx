@@ -1184,7 +1184,7 @@ function InputAreaInner({ surface }: Required<InputAreaProps>) {
   // capabilityRefreshing / compacting：压缩到 reload 完成之间 session 没有可用
   // runtime，此窗口内发 prompt 会冷建第二个 runtime 与 reload 竞争（#1624 I2）。
   const canSend = hasContent && connected && !modelSwitching && !pendingSessionSwitchPath && !inputLocked
-    && !capabilityRefreshing && !compacting && (!isStreaming || inputText.trim().startsWith('/goal ') || inputText.trim().startsWith('- '));
+    && !capabilityRefreshing && !compacting && (!isStreaming || inputText.trim().startsWith('/goal ') || inputText.trim().startsWith('/goal! ') || inputText.trim().startsWith('- '));
 
   const loadVisionAuxiliaryConfig = useCallback(async () => {
     if (surface === 'mobile') {
@@ -1617,7 +1617,7 @@ function InputAreaInner({ surface }: Required<InputAreaProps>) {
   const handleSend = useCallback(async () => {
     // Svananda: 忙碌時排隊邏輯 (Queue Mode)
     if (isStreaming || sending) {
-      if (!inputText.trim().startsWith('/goal ') && !inputText.trim().startsWith('- ')) {
+      if (!inputText.trim().startsWith('/goal ') && !inputText.trim().startsWith('/goal! ') && !inputText.trim().startsWith('- ')) {
         return; // 一般訊息不排隊，由 Button 狀態擋下，或在這裡阻擋
       }
       
@@ -1629,7 +1629,14 @@ function InputAreaInner({ surface }: Required<InputAreaProps>) {
 
       // 擷取輸入的內容作為 Todo，並加上 Svananda 專屬的 Quiet Mode 標籤
       const rawText = inputText.trim();
-      const todoContent = rawText.startsWith('/goal ') ? rawText.slice(6).trim() : rawText.slice(2).trim();
+      let todoContent = '';
+      if (rawText.startsWith('/goal! ')) {
+        todoContent = rawText.slice(7).trim();
+      } else if (rawText.startsWith('/goal ')) {
+        todoContent = rawText.slice(6).trim();
+      } else {
+        todoContent = rawText.slice(2).trim();
+      }
       if (!todoContent) return;
 
       setSending(true);

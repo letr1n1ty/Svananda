@@ -50,8 +50,8 @@ export function AboutTab() {
     <div className={`${styles['settings-tab-content']} ${styles['active']}`} data-tab="about">
       {/* Hero：保留原 about-hero 独立视觉组件（icon + name + tagline + version + update + check 按钮） */}
       <div className={styles['about-hero']}>
-        <img className={styles['about-icon']} src={appIconUrl} alt="HanaAgent" />
-        <div className={styles['about-name']}>HanaAgent</div>
+        <img className={styles['about-icon']} src={appIconUrl} alt="Svananda" />
+        <div className={styles['about-name']}>Svananda</div>
         <div className={styles['about-tagline']}>{t('settings.about.tagline')}</div>
         {version && <div className={styles['about-version']}>v{version}</div>}
         <AutoUpdateStatus

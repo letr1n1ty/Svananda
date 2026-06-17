@@ -245,8 +245,8 @@ async function serverEnvironmentForNetworkProxy(baseEnv) {
 }
 
 // 按 HANA_HOME 隔离 Electron userData（localStorage / cache / session）
-// 生产: ~/Library/Application Support/Hanako（历史目录，随 HanaAgent 显示名保留）
-// 开发: ~/Library/Application Support/Hanako-dev
+// 生产: ~/Library/Application Support/Svananda
+// 开发: ~/Library/Application Support/Svananda-dev
 const defaultHome = path.join(os.homedir(), ".svananda");
 configureClientSingleInstance(app, {
   hanakoHome,

@@ -123,7 +123,7 @@ export function SplashApp() {
       />
       <div className="splash-text-row">
         <p className={`splash-text${switching ? ' switching' : ''}`}>{text}</p>
-        <span className="splash-sakura" style={{ color: accentColor }}>{symbol}</span>
+        <span className="splash-sakura" style={{ color: `var(--accent, ${accentColor})` }}>{symbol}</span>
       </div>
     </div>
   );
