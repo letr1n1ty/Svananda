@@ -25,10 +25,8 @@ import {
 } from "../../shared/default-workspace.ts";
 import { splitByScope, injectGlobalFields } from '../../shared/config-scope.ts';
 import {
-  clearWorkspaceHistory,
   mergeWorkspaceHistory,
   normalizeWorkspacePath,
-  removeWorkspaceHistoryEntries,
 } from "../../shared/workspace-history.ts";
 import { pruneMissingWorkspaceConfig } from "../../shared/workspace-persistence-gc.ts";
 import {
@@ -234,29 +232,6 @@ export function createConfigRoute(engine: any) {
       const stat = await fs.stat(folder).catch(() => null);
       if (!stat?.isDirectory()) return c.json({ error: "path must be an existing directory" }, 400);
       const cwdHistory = mergeWorkspaceHistory(engine.config.cwd_history, [folder]);
-      await engine.updateConfig({ cwd_history: cwdHistory });
-      return c.json({ ok: true, cwd_history: cwdHistory });
-    } catch (err) {
-      return c.json({ error: err.message }, 500);
-    }
-  });
-
-  route.delete("/config/workspaces/recent", async (c) => {
-    try {
-      const body = await safeJson(c).catch(() => ({}));
-      const folder = normalizeWorkspacePath(body?.path);
-      if (!folder) return c.json({ error: "path must be a non-empty string" }, 400);
-      const cwdHistory = removeWorkspaceHistoryEntries(engine.config.cwd_history, [folder]);
-      await engine.updateConfig({ cwd_history: cwdHistory });
-      return c.json({ ok: true, cwd_history: cwdHistory });
-    } catch (err) {
-      return c.json({ error: err.message }, 500);
-    }
-  });
-
-  route.delete("/config/workspaces/recent/all", async (c) => {
-    try {
-      const cwdHistory = clearWorkspaceHistory();
       await engine.updateConfig({ cwd_history: cwdHistory });
       return c.json({ ok: true, cwd_history: cwdHistory });
     } catch (err) {

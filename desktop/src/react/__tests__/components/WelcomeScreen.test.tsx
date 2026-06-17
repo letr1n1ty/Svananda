@@ -142,25 +142,6 @@ describe('WelcomeScreen workspace picker', () => {
     expect(mocks.hanaFetch.mock.calls.some(([path]) => path === '/api/workbench/files?mountId=mount_docs')).toBe(true);
   });
 
-  it('removes a recent workspace from the picker without switching workspace', async () => {
-    mocks.hanaFetch.mockResolvedValueOnce(new Response(JSON.stringify({
-      ok: true,
-      cwd_history: [],
-    }), { status: 200 }));
-    const { WelcomeScreen } = await import('../../components/WelcomeScreen');
-
-    render(<WelcomeScreen />);
-    fireEvent.click(screen.getByRole('button', { name: /工作台：Desktop/ }));
-    fireEvent.click(screen.getByRole('button', { name: '从列表移除' }));
-
-    expect(useStore.getState().selectedFolder).toBe('/workspace/Desktop');
-    expect(useStore.getState().cwdHistory).toEqual([]);
-    expect(mocks.hanaFetch).toHaveBeenCalledWith('/api/config/workspaces/recent', expect.objectContaining({
-      method: 'DELETE',
-      body: JSON.stringify({ path: '/workspace/Desktop/project-hana' }),
-    }));
-  });
-
   it('does not show a project picker while creating a new session', async () => {
     const { WelcomeScreen } = await import('../../components/WelcomeScreen');
 

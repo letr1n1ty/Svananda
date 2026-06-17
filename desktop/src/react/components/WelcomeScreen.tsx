@@ -18,7 +18,6 @@ import {
   applyStudioWorkspace,
   createLocalStudioWorkspaceFromFolder,
   loadStudioWorkspaces,
-  removeRecentWorkspace,
   removeWorkspaceFolder,
   removeStudioWorkspace,
 } from '../stores/desk-actions';
@@ -26,6 +25,7 @@ import { openSettingsModal } from '../stores/settings-modal-actions';
 import type { Agent, StudioWorkspace } from '../types';
 import { AgentAvatar, refreshAgentAvatarVersion, resolveAgentDisplayInfo, type AgentDisplayInfo } from '../utils/agent-display';
 import styles from './Welcome.module.css';
+import { normalizeWorkspacePath } from '../../../../shared/workspace-history.ts';
 
 
 /* eslint-disable @typescript-eslint/no-explicit-any -- store setState 回调 (s: any) */
@@ -68,7 +68,6 @@ function WelcomeInner() {
   const studioWorkspaces = useStore(s => s.studioWorkspaces);
   const homeFolder = useStore(s => s.homeFolder);
   const workspaceFolders = useStore(s => s.workspaceFolders);
-  const cwdHistory = useStore(s => s.cwdHistory);
 
   // Determine the displayed agent
   const displayAgent = useMemo(() => {
@@ -128,7 +127,6 @@ function WelcomeInner() {
         studioWorkspaces={studioWorkspaces}
         homeFolder={homeFolder}
         workspaceFolders={workspaceFolders}
-        cwdHistory={cwdHistory}
       />
       <MemoryToggle enabled={memoryEnabled} masterEnabled={memoryMasterEnabled} t={t} />
     </div>
@@ -237,7 +235,6 @@ function FolderPicker({
   studioWorkspaces,
   homeFolder,
   workspaceFolders,
-  cwdHistory,
 }: {
   agents: Agent[];
   currentAgentId: string | null;
@@ -247,7 +244,6 @@ function FolderPicker({
   studioWorkspaces: StudioWorkspace[];
   homeFolder: string | null;
   workspaceFolders: string[];
-  cwdHistory: string[];
 }) {
   const { t } = useI18n();
   const [showHistory, setShowHistory] = useState(false);
@@ -288,12 +284,12 @@ function FolderPicker({
   }, []);
 
   const handleButtonClick = useCallback(() => {
-    if (selectedWorkspaceMountId || selectedFolder || studioWorkspaces.length > 0 || cwdHistory.length > 0 || workspaceFolders.length > 0 || agentHomeFolders.length > 0) {
+    if (selectedWorkspaceMountId || selectedFolder || studioWorkspaces.length > 0 || workspaceFolders.length > 0 || agentHomeFolders.length > 0) {
       setShowHistory(prev => !prev);
     } else {
       handleBrowse();
     }
-  }, [agentHomeFolders.length, cwdHistory.length, handleBrowse, selectedFolder, selectedWorkspaceMountId, studioWorkspaces.length, workspaceFolders.length]);
+  }, [agentHomeFolders.length, handleBrowse, selectedFolder, selectedWorkspaceMountId, studioWorkspaces.length, workspaceFolders.length]);
 
   const handleSelectWorkspace = useCallback((workspace: StudioWorkspace) => {
     setShowHistory(false);
@@ -357,7 +353,6 @@ function FolderPicker({
       </button>
       {showHistory && (
         <FolderHistory
-          cwdHistory={cwdHistory}
           agentHomeFolders={agentHomeFolders}
           selectedFolder={selectedFolder}
           selectedWorkspaceMountId={selectedWorkspaceMountId}
@@ -368,7 +363,6 @@ function FolderPicker({
           onSelect={handleSelectHistory}
           onBrowse={handleBrowse}
           onAddWorkspaceFolder={handleAddWorkspaceFolder}
-          onRemoveRecentWorkspace={removeRecentWorkspace}
           onRemoveWorkspaceFolder={removeWorkspaceFolder}
           onRemoveStudioWorkspace={removeStudioWorkspace}
         />
@@ -377,8 +371,7 @@ function FolderPicker({
   );
 }
 
-function FolderHistory({ cwdHistory, agentHomeFolders, selectedFolder, selectedWorkspaceMountId, studioWorkspaces, homeFolder, workspaceFolders, onSelectWorkspace, onSelect, onBrowse, onAddWorkspaceFolder, onRemoveRecentWorkspace, onRemoveWorkspaceFolder, onRemoveStudioWorkspace }: {
-  cwdHistory: string[];
+function FolderHistory({ agentHomeFolders, selectedFolder, selectedWorkspaceMountId, studioWorkspaces, homeFolder, workspaceFolders, onSelectWorkspace, onSelect, onBrowse, onAddWorkspaceFolder, onRemoveWorkspaceFolder, onRemoveStudioWorkspace }: {
   agentHomeFolders: string[];
   selectedFolder: string | null;
   selectedWorkspaceMountId: string | null;
@@ -389,7 +382,6 @@ function FolderHistory({ cwdHistory, agentHomeFolders, selectedFolder, selectedW
   onSelect: (folder: string) => void;
   onBrowse: () => void;
   onAddWorkspaceFolder: () => void;
-  onRemoveRecentWorkspace: (folder: string) => void;
   onRemoveWorkspaceFolder: (folder: string) => void;
   onRemoveStudioWorkspace: (mountId: string) => void;
 }) {
