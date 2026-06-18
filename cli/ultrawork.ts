@@ -29,6 +29,11 @@ export async function runUltrawork(client, connection, args) {
     return renderRun(run, { theme, connection, json: args.json });
   }
 
+  if (args.ultraworkAction === "sync-artifacts") {
+    const run = (await client.syncUltraworkArtifacts(requireRunId(args), { reason: args.reason })).run;
+    return renderRun(run, { theme, connection, json: args.json });
+  }
+
   if (args.ultraworkAction === "run-next-packet") {
     const run = (await client.runNextUltraworkPacket(requireRunId(args), { reason: args.reason })).run;
     return renderRun(run, { theme, connection, json: args.json });
@@ -147,15 +152,10 @@ function renderRun(run, { theme, connection, json }) {
   console.log("");
 
   console.log(`${ansi.bold}Audit${ansi.reset}`);
-  for (const event of run.audit) {
-    console.log(`  ${ansi.dim}${event.at}${ansi.reset} ${event.actor}: ${event.message}`);
-  }
+  for (const event of run.audit) console.log(`  ${ansi.dim}${event.at}${ansi.reset} ${event.actor}: ${event.message}`);
 
-  if (run.status === "waiting_confirmation") {
-    console.log(`\n${ansi.yellow}This run is waiting for confirmation. Run:${ansi.reset} hana ultrawork confirm ${run.id}`);
-  } else if (run.status === "running" || run.status === "queued") {
-    console.log(`\n${ansi.dim}Run next packet with:${ansi.reset} hana ultrawork run-next-packet ${run.id}`);
-  }
+  if (run.status === "waiting_confirmation") console.log(`\n${ansi.yellow}This run is waiting for confirmation. Run:${ansi.reset} hana ultrawork confirm ${run.id}`);
+  else if (run.status === "running" || run.status === "queued") console.log(`\n${ansi.dim}Run next packet with:${ansi.reset} hana ultrawork run-next-packet ${run.id}`);
   return 0;
 }
 
