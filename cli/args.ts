@@ -1,5 +1,5 @@
 const COMMANDS = new Set(["serve", "status", "sessions", "continue", "chat", "ultrawork", "help"]);
-const ULTRAWORK_ACTIONS = new Set(["start", "list", "show", "confirm", "continue", "cancel", "run-next-packet", "run-packet"]);
+const ULTRAWORK_ACTIONS = new Set(["start", "list", "show", "confirm", "continue", "cancel", "run-next-packet", "run-packet", "sync-artifacts"]);
 
 export function parseCliArgs(argv = []) {
   const args = Array.from(argv);
@@ -29,7 +29,7 @@ export function parseCliArgs(argv = []) {
 
   if (command === "ultrawork" && args[0] && ULTRAWORK_ACTIONS.has(args[0])) {
     result.ultraworkAction = args.shift();
-    if (["show", "confirm", "continue", "cancel", "run-next-packet"].includes(result.ultraworkAction)) {
+    if (["show", "confirm", "continue", "cancel", "run-next-packet", "sync-artifacts"].includes(result.ultraworkAction)) {
       result.ultraworkRunId = args.shift() || null;
     } else if (result.ultraworkAction === "run-packet") {
       result.ultraworkRunId = args.shift() || null;
@@ -39,43 +39,25 @@ export function parseCliArgs(argv = []) {
 
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
-    if (arg === "--plain") {
-      result.plain = true;
-    } else if (arg === "--json") {
-      result.json = true;
-    } else if (arg === "--safe") {
-      result.mode = "safe";
-    } else if (arg === "--auto") {
-      result.mode = "auto";
-    } else if (arg === "--godmode") {
-      result.mode = "godmode";
-    } else if (arg === "--mode") {
-      result.mode = normalizeUltraworkMode(requireValue(args, ++i, "--mode"));
-    } else if (arg === "--agent") {
-      result.agents.push(requireValue(args, ++i, "--agent"));
-    } else if (arg === "--reason") {
-      result.reason = requireValue(args, ++i, "--reason");
-    } else if (arg === "--limit") {
-      result.limit = Number.parseInt(requireValue(args, ++i, "--limit"), 10) || 20;
-    } else if (arg === "--url") {
-      result.url = requireValue(args, ++i, "--url");
-    } else if (arg === "--token") {
-      result.token = requireValue(args, ++i, "--token");
-    } else if (arg === "--session") {
-      result.session = requireValue(args, ++i, "--session");
-    } else if (arg === "--") {
+    if (arg === "--plain") result.plain = true;
+    else if (arg === "--json") result.json = true;
+    else if (arg === "--safe") result.mode = "safe";
+    else if (arg === "--auto") result.mode = "auto";
+    else if (arg === "--godmode") result.mode = "godmode";
+    else if (arg === "--mode") result.mode = normalizeUltraworkMode(requireValue(args, ++i, "--mode"));
+    else if (arg === "--agent") result.agents.push(requireValue(args, ++i, "--agent"));
+    else if (arg === "--reason") result.reason = requireValue(args, ++i, "--reason");
+    else if (arg === "--limit") result.limit = Number.parseInt(requireValue(args, ++i, "--limit"), 10) || 20;
+    else if (arg === "--url") result.url = requireValue(args, ++i, "--url");
+    else if (arg === "--token") result.token = requireValue(args, ++i, "--token");
+    else if (arg === "--session") result.session = requireValue(args, ++i, "--session");
+    else if (arg === "--") {
       result.passthrough = args.slice(i + 1);
-      if (command === "ultrawork" && result.ultraworkAction === "start" && !result.goal) {
-        result.goal = result.passthrough.join(" ").trim();
-      }
+      if (command === "ultrawork" && result.ultraworkAction === "start" && !result.goal) result.goal = result.passthrough.join(" ").trim();
       break;
-    } else if (command === "continue" && !result.target) {
-      result.target = arg;
-    } else if (command === "ultrawork" && result.ultraworkAction === "start") {
-      result.goal = [result.goal, arg].filter(Boolean).join(" ").trim();
-    } else {
-      result.passthrough.push(arg);
-    }
+    } else if (command === "continue" && !result.target) result.target = arg;
+    else if (command === "ultrawork" && result.ultraworkAction === "start") result.goal = [result.goal, arg].filter(Boolean).join(" ").trim();
+    else result.passthrough.push(arg);
   }
 
   return result;
@@ -83,9 +65,7 @@ export function parseCliArgs(argv = []) {
 
 function requireValue(args, index, flag) {
   const value = args[index];
-  if (!value || value.startsWith("--")) {
-    throw new Error(`${flag} requires a value`);
-  }
+  if (!value || value.startsWith("--")) throw new Error(`${flag} requires a value`);
   return value;
 }
 
@@ -109,7 +89,8 @@ Usage:
   hana ultrawork confirm <id>       Confirm a safe-mode run
   hana ultrawork continue <id>      Complete the skeleton run
   hana ultrawork run-next-packet <id>       Run the next queued packet with the no-op runner
-  hana ultrawork run-packet <id> <packetId> Run one packet with the no-op runner
+  hana ultrawork run-packet <id> <packetId> Run one packet with the packet runner registry
+  hana ultrawork sync-artifacts <id>         Sync pending artifacts to session files
   hana ultrawork cancel <id>        Cancel a run
 
 Ultrawork options:
@@ -117,7 +98,7 @@ Ultrawork options:
   --auto                            Default autonomy with gated mutations
   --godmode                         Max autonomous loop; high-risk actions still gated
   --agent <id>                      Request an additional specialist agent
-  --reason <text>                   Attach a reason to confirm/continue/cancel/run-packet
+  --reason <text>                   Attach a reason to confirm/continue/cancel/run-packet/sync-artifacts
   --limit <n>                       Limit list output
   --json                            Print raw run JSON
 
