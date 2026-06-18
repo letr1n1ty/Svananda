@@ -10,6 +10,7 @@ export type UltraworkIntent = typeof ULTRAWORK_INTENTS[number];
 export type UltraworkStatus = "queued" | "running" | "waiting_confirmation" | "completed" | "failed" | "cancelled";
 export type UltraworkAgentRole = "hana" | "planner" | "researcher" | "coder" | "operator" | "reviewer" | "archivist";
 export type UltraworkHookPhase = "before_plan" | "after_plan" | "before_tool" | "after_tool" | "before_mutation" | "after_review";
+export type UltraworkArtifactKind = "plan" | "review" | "note";
 
 export type UltraworkAgentSpec = {
   id: UltraworkAgentRole;
@@ -31,6 +32,17 @@ export type UltraworkStep = {
   notes?: string;
 };
 
+export type UltraworkArtifact = {
+  id: string;
+  kind: UltraworkArtifactKind;
+  title: string;
+  agent: UltraworkAgentRole;
+  content: string;
+  source: "utility" | "deterministic" | "system";
+  model?: string | null;
+  createdAt: string;
+};
+
 export type UltraworkAuditEvent = {
   id: string;
   at: string;
@@ -49,6 +61,7 @@ export type UltraworkRun = {
   sessionPath: string | null;
   agents: UltraworkAgentSpec[];
   steps: UltraworkStep[];
+  artifacts: UltraworkArtifact[];
   audit: UltraworkAuditEvent[];
   permissions: UltraworkPermissionProfile;
   createdAt: string;
@@ -77,14 +90,36 @@ export type UltraworkActionInput = {
   reason?: string;
 };
 
+export type UltraworkTextRequest = {
+  kind: "plan" | "review";
+  run: UltraworkRun;
+};
+
+export type UltraworkTextResult = {
+  text: string;
+  model?: string | null;
+};
+
+export type UltraworkTextGenerator = (request: UltraworkTextRequest) => Promise<UltraworkTextResult | string | null | undefined>;
+
 export class OmniUltraworkRuntime {
   private runs = new Map<string, UltraworkRun>();
   private readonly storePath: string;
   private readonly activityHub: any;
+  private readonly textGenerator: UltraworkTextGenerator | null;
 
-  constructor({ hanakoHome, activityHub = null }: { hanakoHome: string; activityHub?: any }) {
+  constructor({
+    hanakoHome,
+    activityHub = null,
+    textGenerator = null,
+  }: {
+    hanakoHome: string;
+    activityHub?: any;
+    textGenerator?: UltraworkTextGenerator | null;
+  }) {
     this.storePath = path.join(hanakoHome, "ultrawork", "runs.json");
     this.activityHub = activityHub || null;
+    this.textGenerator = typeof textGenerator === "function" ? textGenerator : null;
     this.load();
   }
 
@@ -103,6 +138,8 @@ export class OmniUltraworkRuntime {
       ] satisfies UltraworkHookPhase[],
       actions: ["confirm", "continue", "cancel"],
       activityKinds: ["workflow", "workflow_agent", "workflow_step"],
+      artifactKinds: ["plan", "review", "note"],
+      textGeneration: !!this.textGenerator,
     };
   }
 
@@ -116,7 +153,7 @@ export class OmniUltraworkRuntime {
     return this.runs.get(id) || null;
   }
 
-  startRun(input: StartUltraworkInput): UltraworkRun {
+  async startRun(input: StartUltraworkInput): Promise<UltraworkRun> {
     const goal = String(input.goal || "").trim();
     if (!goal) throw new Error("goal is required");
 
@@ -134,6 +171,7 @@ export class OmniUltraworkRuntime {
       sessionPath: input.sessionPath || null,
       agents,
       steps: createInitialPlan({ goal, mode, intent, permissions }),
+      artifacts: [],
       audit: [],
       permissions,
       createdAt: now,
@@ -146,10 +184,11 @@ export class OmniUltraworkRuntime {
       agents: agents.map((agent) => agent.id),
     });
     this.record(run, "permissions.applied", "reviewer", `Applied ${mode} permission profile`, permissions);
-    this.record(run, "plan.generated", "planner", "Generated initial multi-agent execution plan", {
+    this.record(run, "plan.generated", "planner", "Generated initial multi-agent execution graph", {
       stepCount: run.steps.length,
     });
 
+    await this.generateInitialArtifacts(run);
     this.runs.set(run.id, run);
     this.publishActivity(run);
     this.save();
@@ -223,6 +262,55 @@ export class OmniUltraworkRuntime {
     this.publishActivity(run);
     this.save();
     return run;
+  }
+
+  private async generateInitialArtifacts(run: UltraworkRun) {
+    await this.generateArtifact(run, "plan", "Kannon plan", "planner", deterministicPlanContent(run));
+    await this.generateArtifact(run, "review", "Miroku review", "reviewer", deterministicReviewContent(run));
+  }
+
+  private async generateArtifact(
+    run: UltraworkRun,
+    kind: "plan" | "review",
+    title: string,
+    agent: UltraworkAgentRole,
+    fallbackContent: string,
+  ) {
+    let content = fallbackContent;
+    let source: UltraworkArtifact["source"] = "deterministic";
+    let model: string | null = null;
+    if (this.textGenerator) {
+      try {
+        const result = await this.textGenerator({ kind, run });
+        const text = typeof result === "string" ? result : result?.text;
+        if (typeof text === "string" && text.trim()) {
+          content = text.trim();
+          source = "utility";
+          model = typeof result === "object" && result?.model ? result.model : null;
+        }
+      } catch (err: any) {
+        this.record(run, "artifact.generation_failed", agent, `Failed to generate ${kind} artifact; using deterministic fallback`, {
+          error: err?.message || String(err),
+        });
+      }
+    }
+
+    const artifact: UltraworkArtifact = {
+      id: crypto.randomUUID(),
+      kind,
+      title,
+      agent,
+      content,
+      source,
+      model,
+      createdAt: new Date().toISOString(),
+    };
+    run.artifacts.push(artifact);
+    this.record(run, "artifact.generated", agent, `Generated ${kind} artifact`, {
+      artifactId: artifact.id,
+      source,
+      model,
+    });
   }
 
   private advanceSkeleton(run: UltraworkRun, actor: string) {
@@ -328,7 +416,10 @@ export class OmniUltraworkRuntime {
       const raw = JSON.parse(fs.readFileSync(this.storePath, "utf-8"));
       const runs = Array.isArray(raw?.runs) ? raw.runs : [];
       for (const run of runs) {
-        if (run?.id) this.runs.set(run.id, run);
+        if (run?.id) {
+          if (!Array.isArray(run.artifacts)) run.artifacts = [];
+          this.runs.set(run.id, run);
+        }
       }
     } catch {
       this.runs.clear();
@@ -501,6 +592,17 @@ function createInitialPlan({
     createdAt: now,
     updatedAt: now,
   }));
+}
+
+function deterministicPlanContent(run: UltraworkRun) {
+  const agents = run.agents.map((agent) => `${agent.name} (${agent.id})`).join(", ");
+  const steps = run.steps.map((step, index) => `${index + 1}. ${step.title} [${step.agent}/${step.kind}/risk:${step.risk}]`).join("\n");
+  return `# Ultrawork Plan\n\nGoal: ${run.goal}\nMode: ${run.mode}\nIntent: ${run.intent}\nAgents: ${agents}\n\n## Execution graph\n${steps}\n\n## Permission boundary\n${run.permissions.requiresConfirmationFor.join(", ") || "none"}\n`;
+}
+
+function deterministicReviewContent(run: UltraworkRun) {
+  const highRiskSteps = run.steps.filter((step) => step.risk === "high").map((step) => step.title);
+  return `# Ultrawork Review\n\nStatus: ${run.status}\nReviewer: Miroku\n\n## Risk summary\n- High-risk steps: ${highRiskSteps.length ? highRiskSteps.join("; ") : "none"}\n- External sends allowed: ${run.permissions.canSendExternalMessages}\n- Memory writes allowed: ${run.permissions.canWriteMemory}\n- File mutation allowed: ${run.permissions.canMutateFiles}\n\n## Gate recommendation\nProceed only within the ${run.mode} permission profile. Require explicit confirmation for: ${run.permissions.requiresConfirmationFor.join(", ") || "none"}.\n`;
 }
 
 function markWaitingSteps(run: UltraworkRun, nextStatus: UltraworkStatus) {
