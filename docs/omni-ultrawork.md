@@ -8,6 +8,12 @@ Omni Ultrawork is the Svananda counterpart to an agent-harness `ultrawork` mode:
 hana ultrawork "ship the first Omni Ultrawork MVP" --auto
 hana ultrawork "audit my repo and propose the next PR" --safe
 hana ultrawork "finish the whole feature with tests" --godmode --json
+
+hana ultrawork list
+hana ultrawork show <run-id>
+hana ultrawork confirm <run-id> --reason "approved plan"
+hana ultrawork continue <run-id>
+hana ultrawork cancel <run-id> --reason "wrong scope"
 ```
 
 ## API
@@ -17,6 +23,9 @@ GET  /api/ultrawork/capabilities
 GET  /api/ultrawork/runs?limit=20
 GET  /api/ultrawork/runs/:id
 POST /api/ultrawork/runs
+POST /api/ultrawork/runs/:id/confirm
+POST /api/ultrawork/runs/:id/continue
+POST /api/ultrawork/runs/:id/cancel
 ```
 
 Example body:
@@ -30,6 +39,15 @@ Example body:
 }
 ```
 
+Action body:
+
+```json
+{
+  "actor": "cli",
+  "reason": "approved plan"
+}
+```
+
 ## Modes
 
 | Mode | Meaning |
@@ -37,6 +55,17 @@ Example body:
 | `safe` | Plan-first mode. It creates the run and waits for confirmation before autonomous execution. |
 | `auto` | Default mode. It can route, plan, delegate, search, and draft, while mutations remain gated. |
 | `godmode` | Maximum autonomous loop. High-risk effects such as memory writes, external sends, payment, and destructive actions remain gated. |
+
+## Lifecycle
+
+| Action | Meaning |
+| --- | --- |
+| `start` | Creates a run, intent route, agent roster, permission profile, step graph, and audit trail. |
+| `confirm` | Confirms a waiting safe-mode run and advances the skeleton execution graph. |
+| `continue` | Advances a queued or running run. Waiting safe-mode runs remain blocked until confirmation. |
+| `cancel` | Cancels non-completed runs and marks unfinished steps as cancelled. |
+| `show` | Reads one persisted run. |
+| `list` | Lists recent persisted runs. |
 
 ## Agent roster
 
@@ -52,7 +81,7 @@ Example body:
 
 ## Current scope
 
-This PR establishes the transport, data model, permission profile, deterministic intent routing, agent selection, execution graph, and persistent audit log. It intentionally does not yet wire real tool execution, memory writes, PR creation, or background continuation.
+This PR establishes the transport, data model, permission profile, deterministic intent routing, agent selection, execution graph, persistent audit log, and explicit run lifecycle actions. It intentionally does not yet wire real tool execution, memory writes, PR creation, or background continuation.
 
 The audit store is persisted at:
 
@@ -62,8 +91,8 @@ $HANA_HOME/ultrawork/runs.json
 
 ## Next PRs
 
-1. Add confirmation endpoints and continue/cancel actions.
-2. Bind Ultrawork steps to the existing activity hub so Desktop can render live status.
-3. Wire `utility:call-text` for planner/reviewer synthesis.
-4. Add real delegated work packets for coding, research, product, and personal ops.
-5. Add permission-gated file mutation and PR creation.
+1. Bind Ultrawork steps to the existing activity hub so Desktop can render live status.
+2. Wire `utility:call-text` for planner/reviewer synthesis.
+3. Add real delegated work packets for coding, research, product, and personal ops.
+4. Add permission-gated file mutation and PR creation.
+5. Add background continuation with explicit scheduler bounds.
