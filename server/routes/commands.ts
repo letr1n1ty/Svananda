@@ -1,8 +1,9 @@
+import crypto from "crypto";
 import fs from "fs";
 import path from "path";
 import { Hono } from "hono";
 import { createModuleLogger } from "../../lib/debug-log.ts";
-import { OmniUltraworkRuntime } from "../../core/ultrawork/runtime.ts";
+import { OmniUltraworkRuntime, PacketRunnerRegistry } from "../../core/ultrawork/runtime.ts";
 import { callText } from "../../core/llm-client.ts";
 import {
   buildSessionFileSourceKey,
@@ -19,6 +20,7 @@ export function createCommandsRoute(engine) {
     activityHub: engine.activityHub,
     textGenerator: createUltraworkTextGenerator(engine),
     artifactExporter: createUltraworkArtifactExporter(engine),
+    packetRunnerRegistry: createUltraworkPacketRunnerRegistry(),
   });
   route.route("", createUltraworkRoute(ultraworkRuntime));
 
@@ -42,6 +44,32 @@ export function createCommandsRoute(engine) {
   });
 
   return route;
+}
+
+function createUltraworkPacketRunnerRegistry() {
+  return PacketRunnerRegistry.noop().register("coding", "coding:skeleton-impact-map", ({ run, packet }) => {
+    const artifact = {
+      id: crypto.randomUUID(),
+      kind: "note",
+      title: `Coding impact map · ${packet.title}`,
+      agent: packet.agent,
+      content: renderCodingPacketArtifact(run, packet),
+      source: "system",
+      createdAt: new Date().toISOString(),
+    };
+    run.artifacts.push(artifact);
+    return {
+      status: "completed",
+      notes: `Coding runner skeleton produced ${artifact.title}. No files were read, written, or mutated.`,
+      message: `Completed coding packet skeleton: ${packet.title}`,
+      data: {
+        runnerKind: "coding",
+        producedArtifactId: artifact.id,
+        producedArtifactTitle: artifact.title,
+        mutationPerformed: false,
+      },
+    };
+  });
 }
 
 function createUltraworkTextGenerator(engine) {
@@ -120,6 +148,40 @@ function buildUltraworkUserPrompt(kind, run) {
   const packets = (run.workPackets || []).map((packet, index) => `- ${index + 1}. ${packet.title} | agent=${packet.agent} | kind=${packet.kind} | status=${packet.status} | gates=${packet.confirmationGates.join(", ") || "none"}\n  objective: ${packet.objective}\n  deliverables: ${packet.deliverables.join(", ")}`).join("\n");
   const permissions = Object.entries(run.permissions).map(([key, value]) => `- ${key}: ${Array.isArray(value) ? value.join(", ") : value}`).join("\n");
   return `Generate a ${kind} artifact for this Svananda Omni Ultrawork run.\n\nGoal: ${run.goal}\nMode: ${run.mode}\nIntent: ${run.intent}\nStatus: ${run.status}\nSession: ${run.sessionPath || "none"}\n\nAgents:\n${agents}\n\nExecution graph:\n${steps}\n\nDelegated work packets:\n${packets || "none"}\n\nPermission profile:\n${permissions}\n\nOutput requirements:\n- Markdown only.\n- Include concrete next actions.\n- Explicitly call out any actions that require confirmation.\n- Do not claim that tools were executed.\n`;
+}
+
+function renderCodingPacketArtifact(run, packet) {
+  return [
+    `# Coding impact map · ${packet.title}`,
+    "",
+    `Run: ${run.id}`,
+    `Goal: ${run.goal}`,
+    `Mode: ${run.mode}`,
+    `Intent: ${run.intent}`,
+    "",
+    "## Objective",
+    packet.objective,
+    "",
+    "## File impact map",
+    "- No repository files were read or changed by this skeleton runner.",
+    "- Candidate file discovery is deferred to the real coding runner.",
+    "- Any future mutation must pass the run permission profile and packet confirmation gates.",
+    "",
+    "## Implementation checklist",
+    ...packet.deliverables.map((item) => `- Prepare: ${item}`),
+    "",
+    "## Test plan",
+    "- Identify existing package scripts before running tests.",
+    "- Prefer targeted typecheck/unit tests before full-suite execution.",
+    "- Record commands and results in the packet audit trail.",
+    "",
+    "## Confirmation gates",
+    ...(packet.confirmationGates.length ? packet.confirmationGates.map((gate) => `- ${gate}`) : ["- none"]),
+    "",
+    "## Mutation status",
+    "No files were created, modified, deleted, or staged.",
+    "",
+  ].join("\n");
 }
 
 function renderArtifactMarkdown(run, artifact) {
