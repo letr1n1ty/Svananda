@@ -50,6 +50,14 @@ export function createUltraworkRoute(runtime) {
     return action(c, "cancel", (id, body) => runtime.cancelRun(id, body));
   });
 
+  route.post("/ultrawork/runs/:id/packets/next/run", async (c) => {
+    return action(c, "run-next-packet", (id, body) => runtime.runNextPacket(id, body));
+  });
+
+  route.post("/ultrawork/runs/:id/packets/:packetId/run", async (c) => {
+    return action(c, "run-packet", (id, body) => runtime.runPacket(id, c.req.param("packetId"), body));
+  });
+
   async function action(c, name, fn) {
     try {
       const body = await safeJson(c).catch(() => ({}));
@@ -59,7 +67,7 @@ export function createUltraworkRoute(runtime) {
       });
       return c.json({ ok: true, run });
     } catch (err) {
-      const status = err.message === "ultrawork_run_not_found" ? 404 : 409;
+      const status = err.message === "ultrawork_run_not_found" || err.message === "ultrawork_packet_not_found" ? 404 : 409;
       log.error(`${name} failed: ${err.message}`);
       return c.json({ ok: false, error: err.message }, status);
     }
