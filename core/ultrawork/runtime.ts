@@ -80,9 +80,11 @@ export type UltraworkActionInput = {
 export class OmniUltraworkRuntime {
   private runs = new Map<string, UltraworkRun>();
   private readonly storePath: string;
+  private readonly activityHub: any;
 
-  constructor({ hanakoHome }: { hanakoHome: string }) {
+  constructor({ hanakoHome, activityHub = null }: { hanakoHome: string; activityHub?: any }) {
     this.storePath = path.join(hanakoHome, "ultrawork", "runs.json");
+    this.activityHub = activityHub || null;
     this.load();
   }
 
@@ -100,6 +102,7 @@ export class OmniUltraworkRuntime {
         "after_review",
       ] satisfies UltraworkHookPhase[],
       actions: ["confirm", "continue", "cancel"],
+      activityKinds: ["workflow", "workflow_agent", "workflow_step"],
     };
   }
 
@@ -148,6 +151,7 @@ export class OmniUltraworkRuntime {
     });
 
     this.runs.set(run.id, run);
+    this.publishActivity(run);
     this.save();
     return run;
   }
@@ -159,6 +163,7 @@ export class OmniUltraworkRuntime {
       this.record(run, "run.confirm.noop", input.actor || "hana", "Confirmation received, but run was not waiting", {
         status: run.status,
       });
+      this.publishActivity(run);
       this.save();
       return run;
     }
@@ -168,6 +173,7 @@ export class OmniUltraworkRuntime {
       reason: input.reason || null,
     });
     this.advanceSkeleton(run, input.actor || "hana");
+    this.publishActivity(run);
     this.save();
     return run;
   }
@@ -177,6 +183,7 @@ export class OmniUltraworkRuntime {
     this.assertMutable(run);
     if (run.status === "waiting_confirmation") {
       this.record(run, "run.continue.blocked", input.actor || "hana", "Run requires confirmation before continuation");
+      this.publishActivity(run);
       this.save();
       return run;
     }
@@ -185,6 +192,7 @@ export class OmniUltraworkRuntime {
       reason: input.reason || null,
     });
     this.advanceSkeleton(run, input.actor || "hana");
+    this.publishActivity(run);
     this.save();
     return run;
   }
@@ -195,6 +203,7 @@ export class OmniUltraworkRuntime {
       this.record(run, "run.cancel.noop", input.actor || "hana", "Completed run cannot be cancelled", {
         reason: input.reason || null,
       });
+      this.publishActivity(run);
       this.save();
       return run;
     }
@@ -211,6 +220,7 @@ export class OmniUltraworkRuntime {
         reason: input.reason || null,
       });
     }
+    this.publishActivity(run);
     this.save();
     return run;
   }
@@ -232,6 +242,61 @@ export class OmniUltraworkRuntime {
     this.record(run, "run.completed", "reviewer", "Completed skeleton Ultrawork run after lifecycle advancement", {
       caveat: "This is a skeleton completion. Tool execution, memory writes, file mutation, and PR creation are still gated future work.",
     });
+  }
+
+  private publishActivity(run: UltraworkRun) {
+    if (!this.activityHub || typeof this.activityHub.upsert !== "function") return;
+    const parentTaskId = `ultrawork:${run.id}`;
+    const startedAt = toMs(run.createdAt);
+    const finishedAt = isTerminalStatus(run.status) ? toMs(run.updatedAt) : null;
+    this.activityHub.upsert({
+      id: parentTaskId,
+      kind: "workflow",
+      status: toActivityStatus(run.status),
+      sessionPath: run.sessionPath,
+      agentId: "hana",
+      agentName: "Hana",
+      summary: `Omni Ultrawork · ${run.goal}`,
+      label: `${run.mode} · ${run.intent}`,
+      access: run.mode,
+      startedAt,
+      finishedAt,
+    });
+    for (const agent of run.agents) {
+      this.activityHub.upsert({
+        id: `${parentTaskId}:agent:${agent.id}`,
+        kind: "workflow_agent",
+        status: toActivityStatus(run.status),
+        sessionPath: run.sessionPath,
+        agentId: agent.id,
+        agentName: agent.name,
+        summary: agent.mission,
+        label: agent.name,
+        access: agent.autonomy,
+        parentTaskId,
+        phaseLabel: `${run.mode} · ${run.intent}`,
+        startedAt,
+        finishedAt,
+      });
+    }
+    for (const [idx, step] of run.steps.entries()) {
+      this.activityHub.upsert({
+        id: `${parentTaskId}:step:${step.id}`,
+        kind: "workflow_step",
+        status: toActivityStatus(step.status),
+        sessionPath: run.sessionPath,
+        agentId: step.agent,
+        agentName: displayNameForAgent(step.agent),
+        summary: step.notes || step.title,
+        label: `${idx + 1}. ${step.title}`,
+        access: step.requiresConfirmation ? "confirm" : run.mode,
+        parentTaskId,
+        phaseLabel: step.agent,
+        stepKind: step.kind,
+        startedAt: toMs(step.createdAt),
+        finishedAt: isTerminalStatus(step.status) ? toMs(step.updatedAt) : null,
+      });
+    }
   }
 
   private requireRun(id: string) {
@@ -446,6 +511,26 @@ function markWaitingSteps(run: UltraworkRun, nextStatus: UltraworkStatus) {
       step.updatedAt = now;
     }
   }
+}
+
+function toActivityStatus(status: UltraworkStatus) {
+  if (status === "completed") return "done";
+  if (status === "cancelled") return "aborted";
+  if (status === "failed") return "failed";
+  return "running";
+}
+
+function isTerminalStatus(status: UltraworkStatus) {
+  return status === "completed" || status === "cancelled" || status === "failed";
+}
+
+function toMs(value: string | null | undefined) {
+  const ms = value ? Date.parse(value) : NaN;
+  return Number.isFinite(ms) ? ms : null;
+}
+
+function displayNameForAgent(agent: UltraworkAgentRole) {
+  return defaultAgentRoster().find((spec) => spec.id === agent)?.name || agent;
 }
 
 function appendNote(existing: string | undefined, note: string) {
