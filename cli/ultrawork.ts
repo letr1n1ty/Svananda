@@ -29,6 +29,16 @@ export async function runUltrawork(client, connection, args) {
     return renderRun(run, { theme, connection, json: args.json });
   }
 
+  if (args.ultraworkAction === "run-next-packet") {
+    const run = (await client.runNextUltraworkPacket(requireRunId(args), { reason: args.reason })).run;
+    return renderRun(run, { theme, connection, json: args.json });
+  }
+
+  if (args.ultraworkAction === "run-packet") {
+    const run = (await client.runUltraworkPacket(requireRunId(args), requirePacketId(args), { reason: args.reason })).run;
+    return renderRun(run, { theme, connection, json: args.json });
+  }
+
   if (args.ultraworkAction === "cancel") {
     const run = (await client.cancelUltraworkRun(requireRunId(args), { reason: args.reason })).run;
     return renderRun(run, { theme, connection, json: args.json });
@@ -60,6 +70,12 @@ function requireRunId(args) {
   const runId = String(args.ultraworkRunId || "").trim();
   if (!runId) throw new Error(`${args.ultraworkAction} requires a run id`);
   return runId;
+}
+
+function requirePacketId(args) {
+  const packetId = String(args.ultraworkPacketId || "").trim();
+  if (!packetId) throw new Error(`${args.ultraworkAction} requires a packet id`);
+  return packetId;
 }
 
 function renderRun(run, { theme, connection, json }) {
@@ -99,7 +115,7 @@ function renderRun(run, { theme, connection, json }) {
       const marker = markerForStatus(packet.status);
       const gates = packet.confirmationGates?.length ? ` ${ansi.yellow}[gates: ${packet.confirmationGates.join(", ")}]${ansi.reset}` : "";
       console.log(`  ${marker} ${idx + 1}. ${packet.title}${gates}`);
-      console.log(`     ${ansi.dim}${packet.agent} · ${packet.kind} · ${packet.status}${ansi.reset}`);
+      console.log(`     ${ansi.dim}${packet.agent} · ${packet.kind} · ${packet.status} · ${packet.id}${ansi.reset}`);
       console.log(`     ${packet.objective}`);
       if (Array.isArray(packet.deliverables) && packet.deliverables.length) {
         console.log(`     ${ansi.dim}deliverables: ${packet.deliverables.join(", ")}${ansi.reset}`);
@@ -138,7 +154,7 @@ function renderRun(run, { theme, connection, json }) {
   if (run.status === "waiting_confirmation") {
     console.log(`\n${ansi.yellow}This run is waiting for confirmation. Run:${ansi.reset} hana ultrawork confirm ${run.id}`);
   } else if (run.status === "running" || run.status === "queued") {
-    console.log(`\n${ansi.dim}Continue with:${ansi.reset} hana ultrawork continue ${run.id}`);
+    console.log(`\n${ansi.dim}Run next packet with:${ansi.reset} hana ultrawork run-next-packet ${run.id}`);
   }
   return 0;
 }
