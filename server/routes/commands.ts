@@ -109,16 +109,17 @@ function createUltraworkArtifactExporter(engine) {
 
 function buildUltraworkSystemPrompt(kind) {
   if (kind === "review") {
-    return "You are Miroku, the Ultrawork reviewer. Review the run for correctness, privacy, side effects, and permission-boundary violations. Be concrete and concise.";
+    return "You are Miroku, the Ultrawork reviewer. Review the run for correctness, privacy, side effects, delegated packet quality, and permission-boundary violations. Be concrete and concise.";
   }
-  return "You are Kannon, the Ultrawork planner. Convert the goal into a concrete multi-agent execution plan. Respect the mode, permissions, and confirmation gates.";
+  return "You are Kannon, the Ultrawork planner. Convert the goal into a concrete multi-agent execution plan. Respect the mode, permissions, confirmation gates, and delegated work packets.";
 }
 
 function buildUltraworkUserPrompt(kind, run) {
   const agents = run.agents.map((agent) => `- ${agent.name} (${agent.id}): ${agent.mission}`).join("\n");
   const steps = run.steps.map((step, index) => `- ${index + 1}. ${step.title} | agent=${step.agent} | kind=${step.kind} | status=${step.status} | risk=${step.risk} | confirm=${step.requiresConfirmation}`).join("\n");
+  const packets = (run.workPackets || []).map((packet, index) => `- ${index + 1}. ${packet.title} | agent=${packet.agent} | kind=${packet.kind} | status=${packet.status} | gates=${packet.confirmationGates.join(", ") || "none"}\n  objective: ${packet.objective}\n  deliverables: ${packet.deliverables.join(", ")}`).join("\n");
   const permissions = Object.entries(run.permissions).map(([key, value]) => `- ${key}: ${Array.isArray(value) ? value.join(", ") : value}`).join("\n");
-  return `Generate a ${kind} artifact for this Svananda Omni Ultrawork run.\n\nGoal: ${run.goal}\nMode: ${run.mode}\nIntent: ${run.intent}\nStatus: ${run.status}\nSession: ${run.sessionPath || "none"}\n\nAgents:\n${agents}\n\nExecution graph:\n${steps}\n\nPermission profile:\n${permissions}\n\nOutput requirements:\n- Markdown only.\n- Include concrete next actions.\n- Explicitly call out any actions that require confirmation.\n- Do not claim that tools were executed.\n`;
+  return `Generate a ${kind} artifact for this Svananda Omni Ultrawork run.\n\nGoal: ${run.goal}\nMode: ${run.mode}\nIntent: ${run.intent}\nStatus: ${run.status}\nSession: ${run.sessionPath || "none"}\n\nAgents:\n${agents}\n\nExecution graph:\n${steps}\n\nDelegated work packets:\n${packets || "none"}\n\nPermission profile:\n${permissions}\n\nOutput requirements:\n- Markdown only.\n- Include concrete next actions.\n- Explicitly call out any actions that require confirmation.\n- Do not claim that tools were executed.\n`;
 }
 
 function renderArtifactMarkdown(run, artifact) {
