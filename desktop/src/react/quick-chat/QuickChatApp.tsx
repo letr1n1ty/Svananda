@@ -754,7 +754,9 @@ export function QuickChatApp() {
                 isStreaming={false}
                 hasInput={!!draft.trim() || attachments.length > 0}
                 disabled={!canSend}
+                isOptionHeld={false}
                 onSend={() => void send()}
+                onQueue={() => {}}
                 onSteer={() => {}}
                 onStop={() => {}}
               />
