@@ -32,6 +32,13 @@ export type UltraworkStep = {
   notes?: string;
 };
 
+export type UltraworkArtifactExport = {
+  fileId?: string | null;
+  filePath?: string | null;
+  displayName?: string | null;
+  sourceKey?: string | null;
+};
+
 export type UltraworkArtifact = {
   id: string;
   kind: UltraworkArtifactKind;
@@ -40,6 +47,7 @@ export type UltraworkArtifact = {
   content: string;
   source: "utility" | "deterministic" | "system";
   model?: string | null;
+  exportedFile?: UltraworkArtifactExport | null;
   createdAt: string;
 };
 
@@ -101,25 +109,30 @@ export type UltraworkTextResult = {
 };
 
 export type UltraworkTextGenerator = (request: UltraworkTextRequest) => Promise<UltraworkTextResult | string | null | undefined>;
+export type UltraworkArtifactExporter = (request: { run: UltraworkRun; artifact: UltraworkArtifact }) => Promise<UltraworkArtifactExport | null | undefined>;
 
 export class OmniUltraworkRuntime {
   private runs = new Map<string, UltraworkRun>();
   private readonly storePath: string;
   private readonly activityHub: any;
   private readonly textGenerator: UltraworkTextGenerator | null;
+  private readonly artifactExporter: UltraworkArtifactExporter | null;
 
   constructor({
     hanakoHome,
     activityHub = null,
     textGenerator = null,
+    artifactExporter = null,
   }: {
     hanakoHome: string;
     activityHub?: any;
     textGenerator?: UltraworkTextGenerator | null;
+    artifactExporter?: UltraworkArtifactExporter | null;
   }) {
     this.storePath = path.join(hanakoHome, "ultrawork", "runs.json");
     this.activityHub = activityHub || null;
     this.textGenerator = typeof textGenerator === "function" ? textGenerator : null;
+    this.artifactExporter = typeof artifactExporter === "function" ? artifactExporter : null;
     this.load();
   }
 
@@ -140,6 +153,7 @@ export class OmniUltraworkRuntime {
       activityKinds: ["workflow", "workflow_agent", "workflow_step"],
       artifactKinds: ["plan", "review", "note"],
       textGeneration: !!this.textGenerator,
+      artifactExport: !!this.artifactExporter,
     };
   }
 
@@ -311,6 +325,26 @@ export class OmniUltraworkRuntime {
       source,
       model,
     });
+
+    if (this.artifactExporter && run.sessionPath) {
+      try {
+        const exported = await this.artifactExporter({ run, artifact });
+        if (exported) {
+          artifact.exportedFile = exported;
+          this.record(run, "artifact.exported", "archivist", `Exported ${kind} artifact to session file`, {
+            artifactId: artifact.id,
+            fileId: exported.fileId || null,
+            filePath: exported.filePath || null,
+            sourceKey: exported.sourceKey || null,
+          });
+        }
+      } catch (err: any) {
+        this.record(run, "artifact.export_failed", "archivist", `Failed to export ${kind} artifact`, {
+          artifactId: artifact.id,
+          error: err?.message || String(err),
+        });
+      }
+    }
   }
 
   private advanceSkeleton(run: UltraworkRun, actor: string) {
