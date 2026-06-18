@@ -1,4 +1,5 @@
 const COMMANDS = new Set(["serve", "status", "sessions", "continue", "chat", "ultrawork", "help"]);
+const ULTRAWORK_ACTIONS = new Set(["start", "list", "show", "confirm", "continue", "cancel"]);
 
 export function parseCliArgs(argv = []) {
   const args = Array.from(argv);
@@ -17,9 +18,20 @@ export function parseCliArgs(argv = []) {
     session: null,
     target: null,
     goal: null,
+    ultraworkAction: "start",
+    ultraworkRunId: null,
+    reason: null,
+    limit: 20,
     agents: [],
     passthrough: [],
   };
+
+  if (command === "ultrawork" && args[0] && ULTRAWORK_ACTIONS.has(args[0])) {
+    result.ultraworkAction = args.shift();
+    if (["show", "confirm", "continue", "cancel"].includes(result.ultraworkAction)) {
+      result.ultraworkRunId = args.shift() || null;
+    }
+  }
 
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
@@ -37,6 +49,10 @@ export function parseCliArgs(argv = []) {
       result.mode = normalizeUltraworkMode(requireValue(args, ++i, "--mode"));
     } else if (arg === "--agent") {
       result.agents.push(requireValue(args, ++i, "--agent"));
+    } else if (arg === "--reason") {
+      result.reason = requireValue(args, ++i, "--reason");
+    } else if (arg === "--limit") {
+      result.limit = Number.parseInt(requireValue(args, ++i, "--limit"), 10) || 20;
     } else if (arg === "--url") {
       result.url = requireValue(args, ++i, "--url");
     } else if (arg === "--token") {
@@ -45,11 +61,13 @@ export function parseCliArgs(argv = []) {
       result.session = requireValue(args, ++i, "--session");
     } else if (arg === "--") {
       result.passthrough = args.slice(i + 1);
-      if (command === "ultrawork" && !result.goal) result.goal = result.passthrough.join(" ").trim();
+      if (command === "ultrawork" && result.ultraworkAction === "start" && !result.goal) {
+        result.goal = result.passthrough.join(" ").trim();
+      }
       break;
     } else if (command === "continue" && !result.target) {
       result.target = arg;
-    } else if (command === "ultrawork") {
+    } else if (command === "ultrawork" && result.ultraworkAction === "start") {
       result.goal = [result.goal, arg].filter(Boolean).join(" ").trim();
     } else {
       result.passthrough.push(arg);
@@ -82,12 +100,19 @@ Usage:
   hana continue [index|path]        Continue a recent session
   hana chat [--plain]               Open chat
   hana ultrawork <goal>             Start an Omni Ultrawork run
+  hana ultrawork list               List recent Ultrawork runs
+  hana ultrawork show <id>          Show one Ultrawork run
+  hana ultrawork confirm <id>       Confirm and advance a safe-mode run
+  hana ultrawork continue <id>      Continue a running or queued run
+  hana ultrawork cancel <id>        Cancel a run
 
 Ultrawork options:
   --safe                            Plan first; confirmation-heavy autonomy
   --auto                            Default autonomy with gated mutations
   --godmode                         Max autonomous loop; high-risk actions still gated
   --agent <id>                      Request an additional specialist agent
+  --reason <text>                   Attach a reason to confirm/continue/cancel
+  --limit <n>                       Limit list output
   --json                            Print raw run JSON
 
 Connection options:
