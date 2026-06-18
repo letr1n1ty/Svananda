@@ -61,7 +61,7 @@ export function createUltraworkRoute(runtime) {
   async function action(c, name, fn) {
     try {
       const body = await safeJson(c).catch(() => ({}));
-      const run = fn(c.req.param("id"), {
+      const run = await fn(c.req.param("id"), {
         actor: body.actor || "cli",
         reason: body.reason || null,
       });
