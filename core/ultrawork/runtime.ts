@@ -72,6 +72,11 @@ export type StartUltraworkInput = {
   requestedAgents?: string[];
 };
 
+export type UltraworkActionInput = {
+  actor?: string;
+  reason?: string;
+};
+
 export class OmniUltraworkRuntime {
   private runs = new Map<string, UltraworkRun>();
   private readonly storePath: string;
@@ -94,6 +99,7 @@ export class OmniUltraworkRuntime {
         "before_mutation",
         "after_review",
       ] satisfies UltraworkHookPhase[],
+      actions: ["confirm", "continue", "cancel"],
     };
   }
 
@@ -121,7 +127,7 @@ export class OmniUltraworkRuntime {
       goal,
       mode,
       intent,
-      status: mode === "safe" ? "waiting_confirmation" : "completed",
+      status: mode === "safe" ? "waiting_confirmation" : "running",
       sessionPath: input.sessionPath || null,
       agents,
       steps: createInitialPlan({ goal, mode, intent, permissions }),
@@ -144,6 +150,99 @@ export class OmniUltraworkRuntime {
     this.runs.set(run.id, run);
     this.save();
     return run;
+  }
+
+  confirmRun(id: string, input: UltraworkActionInput = {}) {
+    const run = this.requireRun(id);
+    this.assertMutable(run);
+    if (run.status !== "waiting_confirmation") {
+      this.record(run, "run.confirm.noop", input.actor || "hana", "Confirmation received, but run was not waiting", {
+        status: run.status,
+      });
+      this.save();
+      return run;
+    }
+    run.status = "running";
+    markWaitingSteps(run, "queued");
+    this.record(run, "run.confirmed", input.actor || "hana", "Confirmed safe-mode Ultrawork plan", {
+      reason: input.reason || null,
+    });
+    this.advanceSkeleton(run, input.actor || "hana");
+    this.save();
+    return run;
+  }
+
+  continueRun(id: string, input: UltraworkActionInput = {}) {
+    const run = this.requireRun(id);
+    this.assertMutable(run);
+    if (run.status === "waiting_confirmation") {
+      this.record(run, "run.continue.blocked", input.actor || "hana", "Run requires confirmation before continuation");
+      this.save();
+      return run;
+    }
+    if (run.status === "queued") run.status = "running";
+    this.record(run, "run.continued", input.actor || "hana", "Continued Ultrawork run", {
+      reason: input.reason || null,
+    });
+    this.advanceSkeleton(run, input.actor || "hana");
+    this.save();
+    return run;
+  }
+
+  cancelRun(id: string, input: UltraworkActionInput = {}) {
+    const run = this.requireRun(id);
+    if (run.status === "completed") {
+      this.record(run, "run.cancel.noop", input.actor || "hana", "Completed run cannot be cancelled", {
+        reason: input.reason || null,
+      });
+      this.save();
+      return run;
+    }
+    if (run.status !== "cancelled") {
+      const now = new Date().toISOString();
+      run.status = "cancelled";
+      for (const step of run.steps) {
+        if (step.status !== "completed") {
+          step.status = "cancelled";
+          step.updatedAt = now;
+        }
+      }
+      this.record(run, "run.cancelled", input.actor || "hana", "Cancelled Ultrawork run", {
+        reason: input.reason || null,
+      });
+    }
+    this.save();
+    return run;
+  }
+
+  private advanceSkeleton(run: UltraworkRun, actor: string) {
+    const now = new Date().toISOString();
+    for (const step of run.steps) {
+      if (step.status === "completed" || step.status === "cancelled") continue;
+      step.status = "completed";
+      step.updatedAt = now;
+      step.notes = appendNote(step.notes, "Skeleton lifecycle advanced this step; real tool execution is not wired yet.");
+      this.record(run, "step.completed", step.agent, `Completed step: ${step.title}`, {
+        stepId: step.id,
+        kind: step.kind,
+        actor,
+      });
+    }
+    run.status = "completed";
+    this.record(run, "run.completed", "reviewer", "Completed skeleton Ultrawork run after lifecycle advancement", {
+      caveat: "This is a skeleton completion. Tool execution, memory writes, file mutation, and PR creation are still gated future work.",
+    });
+  }
+
+  private requireRun(id: string) {
+    const run = this.getRun(id);
+    if (!run) throw new Error("ultrawork_run_not_found");
+    return run;
+  }
+
+  private assertMutable(run: UltraworkRun) {
+    if (run.status === "cancelled") throw new Error("ultrawork_run_cancelled");
+    if (run.status === "failed") throw new Error("ultrawork_run_failed");
   }
 
   private record(run: UltraworkRun, type: string, actor: string, message: string, data?: Record<string, any>) {
@@ -296,7 +395,7 @@ function createInitialPlan({
     {
       title: "Delegate specialist work packets",
       agent: "hana",
-      status: mode === "safe" ? "queued" : "completed",
+      status: "queued",
       kind: "delegate",
       risk: "medium",
       requiresConfirmation: mode === "safe",
@@ -305,7 +404,7 @@ function createInitialPlan({
     {
       title: "Run permitted tools and collect evidence",
       agent: intent === "coding" ? "coder" : intent === "personal_ops" ? "operator" : "researcher",
-      status: permissions.canMutateFiles || permissions.canSearchExternalSources ? "completed" : "queued",
+      status: "queued",
       kind: "tool",
       risk: permissions.canMutateFiles ? "high" : "medium",
       requiresConfirmation: permissions.requiresConfirmationFor.includes("tool_use"),
@@ -314,7 +413,7 @@ function createInitialPlan({
     {
       title: "Review risk, privacy, and correctness",
       agent: "reviewer",
-      status: mode === "safe" ? "queued" : "completed",
+      status: "queued",
       kind: "review",
       risk: "medium",
       requiresConfirmation: false,
@@ -323,7 +422,7 @@ function createInitialPlan({
     {
       title: "Deliver result and persist audit trail",
       agent: "archivist",
-      status: mode === "safe" ? "queued" : "completed",
+      status: "queued",
       kind: "deliver",
       risk: "low",
       requiresConfirmation: false,
@@ -337,6 +436,20 @@ function createInitialPlan({
     createdAt: now,
     updatedAt: now,
   }));
+}
+
+function markWaitingSteps(run: UltraworkRun, nextStatus: UltraworkStatus) {
+  const now = new Date().toISOString();
+  for (const step of run.steps) {
+    if (step.status === "waiting_confirmation") {
+      step.status = nextStatus;
+      step.updatedAt = now;
+    }
+  }
+}
+
+function appendNote(existing: string | undefined, note: string) {
+  return existing ? `${existing}\n${note}` : note;
 }
 
 function createRunId() {
