@@ -98,6 +98,11 @@ function renderRun(run, { theme, connection, json }) {
     for (const artifact of run.artifacts) {
       const model = artifact.model ? ` · ${artifact.model}` : "";
       console.log(`  ${paint(theme, "◈")} ${artifact.title} ${ansi.dim}${artifact.kind} · ${artifact.agent} · ${artifact.source}${model}${ansi.reset}`);
+      if (artifact.exportedFile?.fileId || artifact.exportedFile?.displayName) {
+        const name = artifact.exportedFile.displayName || artifact.exportedFile.filePath || "session file";
+        const id = artifact.exportedFile.fileId ? ` · ${artifact.exportedFile.fileId}` : "";
+        console.log(`    ${ansi.dim}file: ${name}${id}${ansi.reset}`);
+      }
       console.log(indentPreview(artifact.content, "    "));
     }
     console.log("");
@@ -130,7 +135,9 @@ function renderRunList(runs, theme) {
   }
   for (const run of runs) {
     const artifacts = Array.isArray(run.artifacts) ? ` · artifacts:${run.artifacts.length}` : "";
-    console.log(`${paint(theme, "•")} ${run.id} ${ansi.dim}${run.status} · ${run.mode} · ${run.intent}${artifacts}${ansi.reset}`);
+    const files = Array.isArray(run.artifacts) ? run.artifacts.filter((artifact) => artifact.exportedFile?.fileId).length : 0;
+    const exported = files ? ` · files:${files}` : "";
+    console.log(`${paint(theme, "•")} ${run.id} ${ansi.dim}${run.status} · ${run.mode} · ${run.intent}${artifacts}${exported}${ansi.reset}`);
     console.log(`  ${run.goal}`);
   }
 }
