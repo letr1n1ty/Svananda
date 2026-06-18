@@ -167,12 +167,13 @@ export class OmniUltraworkRuntime {
         "before_mutation",
         "after_review",
       ] satisfies UltraworkHookPhase[],
-      actions: ["confirm", "continue", "cancel"],
+      actions: ["confirm", "continue", "cancel", "run-packet", "run-next-packet"],
       activityKinds: ["workflow", "workflow_agent", "workflow_step"],
       artifactKinds: ["plan", "review", "note"],
       workPacketKinds: ["coding", "product", "research", "personal_ops", "review", "archive"],
       textGeneration: !!this.textGenerator,
       artifactExport: !!this.artifactExporter,
+      packetRunner: "noop",
     };
   }
 
@@ -246,7 +247,6 @@ export class OmniUltraworkRuntime {
     this.record(run, "run.confirmed", input.actor || "hana", "Confirmed safe-mode Ultrawork plan", {
       reason: input.reason || null,
     });
-    this.advanceSkeleton(run, input.actor || "hana");
     this.publishActivity(run);
     this.save();
     return run;
@@ -266,6 +266,71 @@ export class OmniUltraworkRuntime {
       reason: input.reason || null,
     });
     this.advanceSkeleton(run, input.actor || "hana");
+    this.publishActivity(run);
+    this.save();
+    return run;
+  }
+
+  runNextPacket(id: string, input: UltraworkActionInput = {}) {
+    const run = this.requireRun(id);
+    const packet = (run.workPackets || []).find((candidate) => !isTerminalStatus(candidate.status));
+    if (!packet) {
+      this.record(run, "work_packet.run_next.noop", input.actor || "hana", "No runnable work packets remain");
+      this.maybeCompleteRun(run);
+      this.publishActivity(run);
+      this.save();
+      return run;
+    }
+    return this.runPacket(id, packet.id, input);
+  }
+
+  runPacket(id: string, packetId: string, input: UltraworkActionInput = {}) {
+    const run = this.requireRun(id);
+    this.assertMutable(run);
+    if (run.status === "waiting_confirmation") {
+      this.record(run, "work_packet.run.blocked", input.actor || "hana", "Run requires confirmation before packet execution", {
+        packetId,
+      });
+      this.publishActivity(run);
+      this.save();
+      return run;
+    }
+
+    const packet = (run.workPackets || []).find((candidate) => candidate.id === packetId);
+    if (!packet) throw new Error("ultrawork_packet_not_found");
+    if (isTerminalStatus(packet.status)) {
+      this.record(run, "work_packet.run.noop", input.actor || "hana", "Packet is already terminal", {
+        packetId,
+        status: packet.status,
+      });
+      this.publishActivity(run);
+      this.save();
+      return run;
+    }
+
+    const now = new Date().toISOString();
+    run.status = "running";
+    packet.status = "running";
+    packet.updatedAt = now;
+    this.record(run, "work_packet.started", packet.agent, `Started work packet: ${packet.title}`, {
+      packetId: packet.id,
+      kind: packet.kind,
+      actor: input.actor || "hana",
+      runner: "noop",
+    });
+
+    packet.status = "completed";
+    packet.updatedAt = new Date().toISOString();
+    packet.notes = appendNote(packet.notes, "No-op packet runner completed this packet. Real tool execution is not wired yet.");
+    this.record(run, "work_packet.completed", packet.agent, `Completed work packet: ${packet.title}`, {
+      packetId: packet.id,
+      kind: packet.kind,
+      actor: input.actor || "hana",
+      runner: "noop",
+      confirmationGates: packet.confirmationGates,
+    });
+
+    this.maybeCompleteRun(run);
     this.publishActivity(run);
     this.save();
     return run;
@@ -405,12 +470,27 @@ export class OmniUltraworkRuntime {
         packetId: packet.id,
         kind: packet.kind,
         actor,
+        runner: "skeleton",
       });
     }
-    run.status = "completed";
-    this.record(run, "run.completed", "reviewer", "Completed skeleton Ultrawork run after lifecycle advancement", {
-      caveat: "This is a skeleton completion. Tool execution, memory writes, file mutation, and PR creation are still gated future work.",
-    });
+    this.maybeCompleteRun(run);
+  }
+
+  private maybeCompleteRun(run: UltraworkRun) {
+    const packets = run.workPackets || [];
+    if (packets.length && packets.every((packet) => isTerminalStatus(packet.status))) {
+      const now = new Date().toISOString();
+      for (const step of run.steps) {
+        if (step.status !== "completed" && step.status !== "cancelled") {
+          step.status = "completed";
+          step.updatedAt = now;
+        }
+      }
+      run.status = "completed";
+      this.record(run, "run.completed", "reviewer", "Completed skeleton Ultrawork run after packet lifecycle advancement", {
+        caveat: "This is a skeleton completion. Tool execution, memory writes, file mutation, and PR creation are still gated future work.",
+      });
+    }
   }
 
   private publishActivity(run: UltraworkRun) {
