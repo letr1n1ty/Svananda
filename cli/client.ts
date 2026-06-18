@@ -36,62 +36,33 @@ export class HanaCliClient {
     return data;
   }
 
-  health() {
-    return this.request("/api/health");
-  }
-
-  identity() {
-    return this.request("/api/server/identity");
-  }
-
-  agents() {
-    return this.request("/api/agents");
-  }
-
-  sessions() {
-    return this.request("/api/sessions");
-  }
-
-  newSession() {
-    return this.request("/api/sessions/new", { method: "POST", body: {} });
-  }
+  health() { return this.request("/api/health"); }
+  identity() { return this.request("/api/server/identity"); }
+  agents() { return this.request("/api/agents"); }
+  sessions() { return this.request("/api/sessions"); }
+  newSession() { return this.request("/api/sessions/new", { method: "POST", body: {} }); }
 
   switchSession(sessionPath) {
-    return this.request("/api/sessions/switch", {
-      method: "POST",
-      body: { path: sessionPath },
-    });
+    return this.request("/api/sessions/switch", { method: "POST", body: { path: sessionPath } });
   }
 
-  ultraworkCapabilities() {
-    return this.request("/api/ultrawork/capabilities");
-  }
-
-  ultraworkRuns({ limit = 20 } = {}) {
-    return this.request(`/api/ultrawork/runs?limit=${encodeURIComponent(String(limit))}`);
-  }
+  ultraworkCapabilities() { return this.request("/api/ultrawork/capabilities"); }
+  ultraworkRuns({ limit = 20 } = {}) { return this.request(`/api/ultrawork/runs?limit=${encodeURIComponent(String(limit))}`); }
 
   startUltrawork({ goal, mode = "auto", sessionPath = null, agents = [] }) {
-    return this.request("/api/ultrawork/runs", {
+    return this.request("/api/ultrawork/runs", { method: "POST", body: { goal, mode, sessionPath, agents } });
+  }
+
+  getUltraworkRun(id) { return this.request(`/api/ultrawork/runs/${encodeURIComponent(id)}`); }
+  confirmUltraworkRun(id, { reason = null } = {}) { return this.ultraworkAction(id, "confirm", { reason }); }
+  continueUltraworkRun(id, { reason = null } = {}) { return this.ultraworkAction(id, "continue", { reason }); }
+  cancelUltraworkRun(id, { reason = null } = {}) { return this.ultraworkAction(id, "cancel", { reason }); }
+
+  syncUltraworkArtifacts(id, { reason = null } = {}) {
+    return this.request(`/api/ultrawork/runs/${encodeURIComponent(id)}/artifacts/sync`, {
       method: "POST",
-      body: { goal, mode, sessionPath, agents },
+      body: { reason },
     });
-  }
-
-  getUltraworkRun(id) {
-    return this.request(`/api/ultrawork/runs/${encodeURIComponent(id)}`);
-  }
-
-  confirmUltraworkRun(id, { reason = null } = {}) {
-    return this.ultraworkAction(id, "confirm", { reason });
-  }
-
-  continueUltraworkRun(id, { reason = null } = {}) {
-    return this.ultraworkAction(id, "continue", { reason });
-  }
-
-  cancelUltraworkRun(id, { reason = null } = {}) {
-    return this.ultraworkAction(id, "cancel", { reason });
   }
 
   runNextUltraworkPacket(id, { reason = null } = {}) {
@@ -109,10 +80,7 @@ export class HanaCliClient {
   }
 
   ultraworkAction(id, action, body = {}) {
-    return this.request(`/api/ultrawork/runs/${encodeURIComponent(id)}/${action}`, {
-      method: "POST",
-      body,
-    });
+    return this.request(`/api/ultrawork/runs/${encodeURIComponent(id)}/${action}`, { method: "POST", body });
   }
 
   createWebSocket() {
@@ -120,19 +88,12 @@ export class HanaCliClient {
     url.pathname = "/ws";
     url.search = "";
     const headers: Record<string, string> = {};
-    if (this.token && this.queryTokenAllowed) {
-      url.searchParams.set("token", this.token);
-    } else if (this.token) {
-      headers.Authorization = `Bearer ${this.token}`;
-    }
+    if (this.token && this.queryTokenAllowed) url.searchParams.set("token", this.token);
+    else if (this.token) headers.Authorization = `Bearer ${this.token}`;
     return new WebSocket(url.toString(), { headers });
   }
 }
 
 function safeJson(text) {
-  try {
-    return JSON.parse(text);
-  } catch {
-    return text;
-  }
+  try { return JSON.parse(text); } catch { return text; }
 }
