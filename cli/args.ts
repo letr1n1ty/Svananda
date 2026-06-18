@@ -1,5 +1,5 @@
 const COMMANDS = new Set(["serve", "status", "sessions", "continue", "chat", "ultrawork", "help"]);
-const ULTRAWORK_ACTIONS = new Set(["start", "list", "show", "confirm", "continue", "cancel"]);
+const ULTRAWORK_ACTIONS = new Set(["start", "list", "show", "confirm", "continue", "cancel", "run-next-packet", "run-packet"]);
 
 export function parseCliArgs(argv = []) {
   const args = Array.from(argv);
@@ -20,6 +20,7 @@ export function parseCliArgs(argv = []) {
     goal: null,
     ultraworkAction: "start",
     ultraworkRunId: null,
+    ultraworkPacketId: null,
     reason: null,
     limit: 20,
     agents: [],
@@ -28,8 +29,11 @@ export function parseCliArgs(argv = []) {
 
   if (command === "ultrawork" && args[0] && ULTRAWORK_ACTIONS.has(args[0])) {
     result.ultraworkAction = args.shift();
-    if (["show", "confirm", "continue", "cancel"].includes(result.ultraworkAction)) {
+    if (["show", "confirm", "continue", "cancel", "run-next-packet"].includes(result.ultraworkAction)) {
       result.ultraworkRunId = args.shift() || null;
+    } else if (result.ultraworkAction === "run-packet") {
+      result.ultraworkRunId = args.shift() || null;
+      result.ultraworkPacketId = args.shift() || null;
     }
   }
 
@@ -102,8 +106,10 @@ Usage:
   hana ultrawork <goal>             Start an Omni Ultrawork run
   hana ultrawork list               List recent Ultrawork runs
   hana ultrawork show <id>          Show one Ultrawork run
-  hana ultrawork confirm <id>       Confirm and advance a safe-mode run
-  hana ultrawork continue <id>      Continue a running or queued run
+  hana ultrawork confirm <id>       Confirm a safe-mode run
+  hana ultrawork continue <id>      Complete the skeleton run
+  hana ultrawork run-next-packet <id>       Run the next queued packet with the no-op runner
+  hana ultrawork run-packet <id> <packetId> Run one packet with the no-op runner
   hana ultrawork cancel <id>        Cancel a run
 
 Ultrawork options:
@@ -111,7 +117,7 @@ Ultrawork options:
   --auto                            Default autonomy with gated mutations
   --godmode                         Max autonomous loop; high-risk actions still gated
   --agent <id>                      Request an additional specialist agent
-  --reason <text>                   Attach a reason to confirm/continue/cancel
+  --reason <text>                   Attach a reason to confirm/continue/cancel/run-packet
   --limit <n>                       Limit list output
   --json                            Print raw run JSON
 
