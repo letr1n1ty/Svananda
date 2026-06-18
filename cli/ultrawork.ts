@@ -1,6 +1,39 @@
 import { ansi, paint, createTerminalTheme } from "./terminal-theme.ts";
 
 export async function runUltrawork(client, connection, args) {
+  const health = await client.health().catch(() => ({}));
+  const theme = createTerminalTheme(health.agentYuan);
+
+  if (args.ultraworkAction === "list") {
+    const result = await client.ultraworkRuns({ limit: args.limit });
+    if (args.json) {
+      console.log(JSON.stringify(result.runs || [], null, 2));
+      return 0;
+    }
+    renderRunList(result.runs || [], theme);
+    return 0;
+  }
+
+  if (args.ultraworkAction === "show") {
+    const run = await loadRun(client, args.ultraworkRunId);
+    return renderRun(run, { theme, connection, json: args.json });
+  }
+
+  if (args.ultraworkAction === "confirm") {
+    const run = (await client.confirmUltraworkRun(requireRunId(args), { reason: args.reason })).run;
+    return renderRun(run, { theme, connection, json: args.json });
+  }
+
+  if (args.ultraworkAction === "continue") {
+    const run = (await client.continueUltraworkRun(requireRunId(args), { reason: args.reason })).run;
+    return renderRun(run, { theme, connection, json: args.json });
+  }
+
+  if (args.ultraworkAction === "cancel") {
+    const run = (await client.cancelUltraworkRun(requireRunId(args), { reason: args.reason })).run;
+    return renderRun(run, { theme, connection, json: args.json });
+  }
+
   const goal = String(args.goal || "").trim();
   if (!goal) {
     console.error(`${ansi.red}ultrawork requires a goal${ansi.reset}`);
@@ -8,17 +41,29 @@ export async function runUltrawork(client, connection, args) {
     return 1;
   }
 
-  const health = await client.health().catch(() => ({}));
-  const theme = createTerminalTheme(health.agentYuan);
   const result = await client.startUltrawork({
     goal,
     mode: args.mode,
     sessionPath: args.session,
     agents: args.agents,
   });
-  const run = result.run;
+  return renderRun(result.run, { theme, connection, json: args.json });
+}
 
-  if (args.json) {
+async function loadRun(client, id) {
+  const runId = String(id || "").trim();
+  if (!runId) throw new Error("ultrawork run id is required");
+  return (await client.getUltraworkRun(runId)).run;
+}
+
+function requireRunId(args) {
+  const runId = String(args.ultraworkRunId || "").trim();
+  if (!runId) throw new Error(`${args.ultraworkAction} requires a run id`);
+  return runId;
+}
+
+function renderRun(run, { theme, connection, json }) {
+  if (json) {
     console.log(JSON.stringify(run, null, 2));
     return 0;
   }
@@ -41,7 +86,7 @@ export async function runUltrawork(client, connection, args) {
 
   console.log(`${ansi.bold}Plan${ansi.reset}`);
   for (const [idx, step] of run.steps.entries()) {
-    const marker = step.status === "completed" ? `${ansi.green}✓${ansi.reset}` : step.status === "waiting_confirmation" ? `${ansi.yellow}!${ansi.reset}` : `${ansi.dim}·${ansi.reset}`;
+    const marker = markerForStatus(step.status);
     const confirm = step.requiresConfirmation ? ` ${ansi.yellow}[confirm]${ansi.reset}` : "";
     console.log(`  ${marker} ${idx + 1}. ${step.title}${confirm}`);
     console.log(`     ${ansi.dim}${step.agent} · ${step.kind} · risk:${step.risk} · ${step.status}${ansi.reset}`);
@@ -61,7 +106,28 @@ export async function runUltrawork(client, connection, args) {
   }
 
   if (run.status === "waiting_confirmation") {
-    console.log(`\n${ansi.yellow}This run is waiting for confirmation before autonomous execution.${ansi.reset}`);
+    console.log(`\n${ansi.yellow}This run is waiting for confirmation. Run:${ansi.reset} hana ultrawork confirm ${run.id}`);
+  } else if (run.status === "running" || run.status === "queued") {
+    console.log(`\n${ansi.dim}Continue with:${ansi.reset} hana ultrawork continue ${run.id}`);
   }
   return 0;
+}
+
+function renderRunList(runs, theme) {
+  if (!runs.length) {
+    console.log(`${ansi.dim}No Ultrawork runs yet.${ansi.reset}`);
+    return;
+  }
+  for (const run of runs) {
+    console.log(`${paint(theme, "•")} ${run.id} ${ansi.dim}${run.status} · ${run.mode} · ${run.intent}${ansi.reset}`);
+    console.log(`  ${run.goal}`);
+  }
+}
+
+function markerForStatus(status) {
+  if (status === "completed") return `${ansi.green}✓${ansi.reset}`;
+  if (status === "waiting_confirmation") return `${ansi.yellow}!${ansi.reset}`;
+  if (status === "cancelled") return `${ansi.red}×${ansi.reset}`;
+  if (status === "running") return `${ansi.green}▶${ansi.reset}`;
+  return `${ansi.dim}·${ansi.reset}`;
 }
