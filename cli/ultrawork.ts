@@ -93,6 +93,21 @@ function renderRun(run, { theme, connection, json }) {
   }
   console.log("");
 
+  if (Array.isArray(run.workPackets) && run.workPackets.length) {
+    console.log(`${ansi.bold}Work packets${ansi.reset}`);
+    for (const [idx, packet] of run.workPackets.entries()) {
+      const marker = markerForStatus(packet.status);
+      const gates = packet.confirmationGates?.length ? ` ${ansi.yellow}[gates: ${packet.confirmationGates.join(", ")}]${ansi.reset}` : "";
+      console.log(`  ${marker} ${idx + 1}. ${packet.title}${gates}`);
+      console.log(`     ${ansi.dim}${packet.agent} · ${packet.kind} · ${packet.status}${ansi.reset}`);
+      console.log(`     ${packet.objective}`);
+      if (Array.isArray(packet.deliverables) && packet.deliverables.length) {
+        console.log(`     ${ansi.dim}deliverables: ${packet.deliverables.join(", ")}${ansi.reset}`);
+      }
+    }
+    console.log("");
+  }
+
   if (Array.isArray(run.artifacts) && run.artifacts.length) {
     console.log(`${ansi.bold}Artifacts${ansi.reset}`);
     for (const artifact of run.artifacts) {
@@ -134,10 +149,11 @@ function renderRunList(runs, theme) {
     return;
   }
   for (const run of runs) {
+    const packets = Array.isArray(run.workPackets) ? ` · packets:${run.workPackets.length}` : "";
     const artifacts = Array.isArray(run.artifacts) ? ` · artifacts:${run.artifacts.length}` : "";
     const files = Array.isArray(run.artifacts) ? run.artifacts.filter((artifact) => artifact.exportedFile?.fileId).length : 0;
     const exported = files ? ` · files:${files}` : "";
-    console.log(`${paint(theme, "•")} ${run.id} ${ansi.dim}${run.status} · ${run.mode} · ${run.intent}${artifacts}${exported}${ansi.reset}`);
+    console.log(`${paint(theme, "•")} ${run.id} ${ansi.dim}${run.status} · ${run.mode} · ${run.intent}${packets}${artifacts}${exported}${ansi.reset}`);
     console.log(`  ${run.goal}`);
   }
 }
