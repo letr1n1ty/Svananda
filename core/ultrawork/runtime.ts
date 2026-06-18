@@ -13,7 +13,6 @@ export type UltraworkAgentRole = "hana" | "planner" | "researcher" | "coder" | "
 export type UltraworkHookPhase = "before_plan" | "after_plan" | "before_tool" | "after_tool" | "before_mutation" | "after_review";
 export type UltraworkArtifactKind = "plan" | "review" | "note";
 export type UltraworkWorkPacketKind = typeof ULTRAWORK_WORK_PACKET_KINDS[number];
-
 export type UltraworkAgentSpec = { id: UltraworkAgentRole; name: string; mission: string; autonomy: "observe" | "draft" | "operate" | "govern" };
 export type UltraworkStep = { id: string; title: string; agent: UltraworkAgentRole; status: UltraworkStatus; kind: "intent" | "plan" | "delegate" | "tool" | "review" | "deliver"; risk: "low" | "medium" | "high"; requiresConfirmation: boolean; createdAt: string; updatedAt: string; notes?: string };
 export type UltraworkWorkPacket = { id: string; title: string; kind: UltraworkWorkPacketKind; agent: UltraworkAgentRole; status: UltraworkStatus; objective: string; inputs: string[]; deliverables: string[]; confirmationGates: string[]; source: "deterministic" | "planner" | "system"; createdAt: string; updatedAt: string; notes?: string };
@@ -44,14 +43,14 @@ export class PacketRunnerRegistry {
 export class OmniUltraworkRuntime {
   private runs = new Map<string, UltraworkRun>();
   private readonly storePath: string;
-  private readonly activityHub: any;
+  private readonly getActivityHub: () => any;
   private readonly textGenerator: UltraworkTextGenerator | null;
   private readonly artifactExporter: UltraworkArtifactExporter | null;
   private readonly packetRunnerRegistry: PacketRunnerRegistry;
 
-  constructor({ hanakoHome, activityHub = null, textGenerator = null, artifactExporter = null, packetRunnerRegistry = null }: { hanakoHome: string; activityHub?: any; textGenerator?: UltraworkTextGenerator | null; artifactExporter?: UltraworkArtifactExporter | null; packetRunnerRegistry?: PacketRunnerRegistry | null }) {
+  constructor({ hanakoHome, activityHub = null, getActivityHub = null, textGenerator = null, artifactExporter = null, packetRunnerRegistry = null }: { hanakoHome: string; activityHub?: any; getActivityHub?: (() => any) | null; textGenerator?: UltraworkTextGenerator | null; artifactExporter?: UltraworkArtifactExporter | null; packetRunnerRegistry?: PacketRunnerRegistry | null }) {
     this.storePath = path.join(hanakoHome, "ultrawork", "runs.json");
-    this.activityHub = activityHub || null;
+    this.getActivityHub = typeof getActivityHub === "function" ? getActivityHub : () => activityHub || null;
     this.textGenerator = typeof textGenerator === "function" ? textGenerator : null;
     this.artifactExporter = typeof artifactExporter === "function" ? artifactExporter : null;
     this.packetRunnerRegistry = packetRunnerRegistry || PacketRunnerRegistry.noop();
@@ -59,21 +58,7 @@ export class OmniUltraworkRuntime {
   }
 
   capabilities() {
-    return {
-      modes: ULTRAWORK_MODES,
-      intents: ULTRAWORK_INTENTS,
-      agents: defaultAgentRoster(),
-      lifecycleHooks: ["before_plan", "after_plan", "before_tool", "after_tool", "before_mutation", "after_review"] satisfies UltraworkHookPhase[],
-      actions: ["confirm", "continue", "cancel", "run-packet", "run-next-packet", "export-artifacts"],
-      activityKinds: ["workflow", "workflow_agent", "workflow_step"],
-      artifactKinds: ["plan", "review", "note"],
-      workPacketKinds: ULTRAWORK_WORK_PACKET_KINDS,
-      packetRunners: this.packetRunnerRegistry.describe(),
-      textGeneration: !!this.textGenerator,
-      artifactExport: !!this.artifactExporter,
-      packetRunner: "registry",
-      runnerArtifactExport: !!this.artifactExporter,
-    };
+    return { modes: ULTRAWORK_MODES, intents: ULTRAWORK_INTENTS, agents: defaultAgentRoster(), lifecycleHooks: ["before_plan", "after_plan", "before_tool", "after_tool", "before_mutation", "after_review"] satisfies UltraworkHookPhase[], actions: ["confirm", "continue", "cancel", "run-packet", "run-next-packet", "sync-artifacts"], activityKinds: ["workflow", "workflow_agent", "workflow_step"], artifactKinds: ["plan", "review", "note"], workPacketKinds: ULTRAWORK_WORK_PACKET_KINDS, packetRunners: this.packetRunnerRegistry.describe(), textGeneration: !!this.textGenerator, artifactExport: !!this.artifactExporter, packetRunner: "registry", runnerArtifactExport: !!this.artifactExporter };
   }
 
   listRuns({ limit = 20 }: { limit?: number } = {}) { return Array.from(this.runs.values()).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).slice(0, limit); }
@@ -101,40 +86,13 @@ export class OmniUltraworkRuntime {
     return run;
   }
 
-  confirmRun(id: string, input: UltraworkActionInput = {}) {
-    const run = this.requireRun(id);
-    this.assertMutable(run);
-    if (run.status !== "waiting_confirmation") { this.record(run, "run.confirm.noop", input.actor || "hana", "Confirmation received, but run was not waiting", { status: run.status }); this.publishActivity(run); this.save(); return run; }
-    run.status = "running";
-    markWaitingSteps(run, "queued");
-    this.record(run, "run.confirmed", input.actor || "hana", "Confirmed safe-mode Ultrawork plan", { reason: input.reason || null });
-    this.publishActivity(run);
-    this.save();
-    return run;
-  }
+  confirmRun(id: string, input: UltraworkActionInput = {}) { const run = this.requireRun(id); this.assertMutable(run); if (run.status !== "waiting_confirmation") { this.record(run, "run.confirm.noop", input.actor || "hana", "Confirmation received, but run was not waiting", { status: run.status }); this.publishActivity(run); this.save(); return run; } run.status = "running"; markWaitingSteps(run, "queued"); this.record(run, "run.confirmed", input.actor || "hana", "Confirmed safe-mode Ultrawork plan", { reason: input.reason || null }); this.publishActivity(run); this.save(); return run; }
+  continueRun(id: string, input: UltraworkActionInput = {}) { const run = this.requireRun(id); this.assertMutable(run); if (run.status === "waiting_confirmation") { this.record(run, "run.continue.blocked", input.actor || "hana", "Run requires confirmation before continuation"); this.publishActivity(run); this.save(); return run; } if (run.status === "queued") run.status = "running"; this.record(run, "run.continued", input.actor || "hana", "Continued Ultrawork run", { reason: input.reason || null }); this.advanceSkeleton(run, input.actor || "hana"); this.publishActivity(run); this.save(); return run; }
 
-  continueRun(id: string, input: UltraworkActionInput = {}) {
-    const run = this.requireRun(id);
-    this.assertMutable(run);
-    if (run.status === "waiting_confirmation") { this.record(run, "run.continue.blocked", input.actor || "hana", "Run requires confirmation before continuation"); this.publishActivity(run); this.save(); return run; }
-    if (run.status === "queued") run.status = "running";
-    this.record(run, "run.continued", input.actor || "hana", "Continued Ultrawork run", { reason: input.reason || null });
-    this.advanceSkeleton(run, input.actor || "hana");
-    this.publishActivity(run);
-    this.save();
-    return run;
-  }
-
-  async runNextPacket(id: string, input: UltraworkActionInput = {}) {
-    const run = this.requireRun(id);
-    const packet = (run.workPackets || []).find((candidate) => !isTerminalStatus(candidate.status));
-    if (!packet) { this.record(run, "work_packet.run_next.noop", input.actor || "hana", "No runnable work packets remain"); this.maybeCompleteRun(run); this.publishActivity(run); this.save(); return run; }
-    return await this.runPacket(id, packet.id, input);
-  }
+  async runNextPacket(id: string, input: UltraworkActionInput = {}) { const run = this.requireRun(id); const packet = (run.workPackets || []).find((candidate) => !isTerminalStatus(candidate.status)); if (!packet) { this.record(run, "work_packet.run_next.noop", input.actor || "hana", "No runnable work packets remain"); this.maybeCompleteRun(run); this.publishActivity(run); this.save(); return run; } return await this.runPacket(id, packet.id, input); }
 
   async runPacket(id: string, packetId: string, input: UltraworkActionInput = {}) {
-    const run = this.requireRun(id);
-    this.assertMutable(run);
+    const run = this.requireRun(id); this.assertMutable(run);
     if (run.status === "waiting_confirmation") { this.record(run, "work_packet.run.blocked", input.actor || "hana", "Run requires confirmation before packet execution", { packetId }); this.publishActivity(run); this.save(); return run; }
     const packet = (run.workPackets || []).find((candidate) => candidate.id === packetId);
     if (!packet) throw new Error("ultrawork_packet_not_found");
@@ -142,121 +100,37 @@ export class OmniUltraworkRuntime {
     const entry = this.packetRunnerRegistry.get(packet.kind);
     if (!entry) throw new Error("ultrawork_packet_runner_not_found");
     const actor = input.actor || "hana";
-    run.status = "running";
-    packet.status = "running";
-    packet.updatedAt = new Date().toISOString();
+    run.status = "running"; packet.status = "running"; packet.updatedAt = new Date().toISOString();
     this.record(run, "work_packet.started", packet.agent, `Started work packet: ${packet.title}`, { packetId: packet.id, kind: packet.kind, actor, runner: entry.name });
     let result: UltraworkPacketRunnerResult | null | undefined;
     try { result = await entry.runner({ run, packet, actor, reason: input.reason || null }); } catch (err: any) { result = { status: "failed", notes: `Packet runner failed: ${err?.message || String(err)}`, message: "Packet runner failed", data: { error: err?.message || String(err) } }; }
     const producedArtifacts = await this.addRunnerArtifacts(run, packet, entry.name, result?.artifacts || []);
     const nextStatus = result?.status === "failed" ? "failed" : "completed";
-    packet.status = nextStatus;
-    packet.updatedAt = new Date().toISOString();
-    packet.notes = appendNote(packet.notes, result?.notes || `Packet runner ${entry.name} completed this packet.`);
+    packet.status = nextStatus; packet.updatedAt = new Date().toISOString(); packet.notes = appendNote(packet.notes, result?.notes || `Packet runner ${entry.name} completed this packet.`);
     this.record(run, nextStatus === "failed" ? "work_packet.failed" : "work_packet.completed", packet.agent, result?.message || `${nextStatus === "failed" ? "Failed" : "Completed"} work packet: ${packet.title}`, { packetId: packet.id, kind: packet.kind, actor, runner: entry.name, confirmationGates: packet.confirmationGates, producedArtifactIds: producedArtifacts.map((artifact) => artifact.id), exportedFileIds: producedArtifacts.map((artifact) => artifact.exportedFile?.fileId).filter(Boolean), ...(result?.data || {}) });
-    this.maybeCompleteRun(run);
-    this.publishActivity(run);
-    this.save();
-    return run;
+    this.maybeCompleteRun(run); this.publishActivity(run); this.save(); return run;
   }
 
   async exportArtifacts(id: string, input: UltraworkActionInput = {}) {
     const run = this.requireRun(id);
-    if (!this.artifactExporter) {
-      this.record(run, "artifacts.export.blocked", input.actor || "hana", "No artifact exporter is configured");
-      this.publishActivity(run);
-      this.save();
-      return run;
-    }
-    if (!run.sessionPath) {
-      this.record(run, "artifacts.export.blocked", input.actor || "hana", "Run has no sessionPath, so artifacts cannot be exported to session files");
-      this.publishActivity(run);
-      this.save();
-      return run;
-    }
+    if (!this.artifactExporter) { this.record(run, "artifacts.export.blocked", input.actor || "hana", "No artifact exporter is configured"); this.publishActivity(run); this.save(); return run; }
+    if (!run.sessionPath) { this.record(run, "artifacts.export.blocked", input.actor || "hana", "Run has no sessionPath, so artifacts cannot be exported to session files"); this.publishActivity(run); this.save(); return run; }
     const pending = (run.artifacts || []).filter((artifact) => !artifact.exportedFile?.fileId && !artifact.exportedFile?.filePath);
     for (const artifact of pending) await this.exportArtifact(run, artifact);
     this.record(run, "artifacts.exported", input.actor || "hana", `Exported ${pending.length} pending artifacts`, { artifactIds: pending.map((artifact) => artifact.id), reason: input.reason || null });
-    this.publishActivity(run);
-    this.save();
-    return run;
+    this.publishActivity(run); this.save(); return run;
   }
 
-  cancelRun(id: string, input: UltraworkActionInput = {}) {
-    const run = this.requireRun(id);
-    if (run.status === "completed") { this.record(run, "run.cancel.noop", input.actor || "hana", "Completed run cannot be cancelled", { reason: input.reason || null }); this.publishActivity(run); this.save(); return run; }
-    if (run.status !== "cancelled") {
-      const now = new Date().toISOString();
-      run.status = "cancelled";
-      for (const step of run.steps) if (step.status !== "completed") { step.status = "cancelled"; step.updatedAt = now; }
-      for (const packet of run.workPackets || []) if (packet.status !== "completed") { packet.status = "cancelled"; packet.updatedAt = now; }
-      this.record(run, "run.cancelled", input.actor || "hana", "Cancelled Ultrawork run", { reason: input.reason || null });
-    }
-    this.publishActivity(run);
-    this.save();
-    return run;
-  }
-
+  cancelRun(id: string, input: UltraworkActionInput = {}) { const run = this.requireRun(id); if (run.status === "completed") { this.record(run, "run.cancel.noop", input.actor || "hana", "Completed run cannot be cancelled", { reason: input.reason || null }); this.publishActivity(run); this.save(); return run; } if (run.status !== "cancelled") { const now = new Date().toISOString(); run.status = "cancelled"; for (const step of run.steps) if (step.status !== "completed") { step.status = "cancelled"; step.updatedAt = now; } for (const packet of run.workPackets || []) if (packet.status !== "completed") { packet.status = "cancelled"; packet.updatedAt = now; } this.record(run, "run.cancelled", input.actor || "hana", "Cancelled Ultrawork run", { reason: input.reason || null }); } this.publishActivity(run); this.save(); return run; }
   private generateWorkPackets(run: UltraworkRun) { const packets = createDeterministicWorkPackets(run); run.workPackets.push(...packets); this.record(run, "work_packets.generated", "planner", `Generated ${packets.length} delegated work packets`, { packetIds: packets.map((packet) => packet.id), packetKinds: packets.map((packet) => packet.kind) }); }
   private async generateInitialArtifacts(run: UltraworkRun) { await this.generateArtifact(run, "plan", "Kannon plan", "planner", deterministicPlanContent(run)); await this.generateArtifact(run, "review", "Miroku review", "reviewer", deterministicReviewContent(run)); }
-
-  private async generateArtifact(run: UltraworkRun, kind: "plan" | "review", title: string, agent: UltraworkAgentRole, fallbackContent: string) {
-    let content = fallbackContent; let source: UltraworkArtifact["source"] = "deterministic"; let model: string | null = null;
-    if (this.textGenerator) {
-      try { const result = await this.textGenerator({ kind, run }); const text = typeof result === "string" ? result : result?.text; if (typeof text === "string" && text.trim()) { content = text.trim(); source = "utility"; model = typeof result === "object" && result?.model ? result.model : null; } } catch (err: any) { this.record(run, "artifact.generation_failed", agent, `Failed to generate ${kind} artifact; using deterministic fallback`, { error: err?.message || String(err) }); }
-    }
-    const artifact = await this.addArtifact(run, { kind, title, agent, content, source, model });
-    this.record(run, "artifact.generated", agent, `Generated ${kind} artifact`, { artifactId: artifact.id, source, model });
-    return artifact;
-  }
-
-  private async addRunnerArtifacts(run: UltraworkRun, packet: UltraworkWorkPacket, runner: string, artifacts: UltraworkArtifactDraft[]) {
-    const added: UltraworkArtifact[] = [];
-    for (const draft of artifacts) { const artifact = await this.addArtifact(run, draft); added.push(artifact); this.record(run, "artifact.generated", packet.agent, `Generated runner artifact: ${artifact.title}`, { artifactId: artifact.id, packetId: packet.id, runner, source: artifact.source }); }
-    return added;
-  }
-
-  private async addArtifact(run: UltraworkRun, draft: UltraworkArtifactDraft) {
-    const artifact: UltraworkArtifact = { id: draft.id || crypto.randomUUID(), kind: draft.kind, title: draft.title, agent: draft.agent, content: draft.content, source: draft.source, model: draft.model || null, createdAt: draft.createdAt || new Date().toISOString() };
-    run.artifacts.push(artifact);
-    await this.exportArtifact(run, artifact);
-    return artifact;
-  }
-
-  private async exportArtifact(run: UltraworkRun, artifact: UltraworkArtifact) {
-    if (!this.artifactExporter || !run.sessionPath) return;
-    try {
-      const exported = await this.artifactExporter({ run, artifact });
-      if (exported) { artifact.exportedFile = exported; this.record(run, "artifact.exported", "archivist", `Exported ${artifact.kind} artifact to session file`, { artifactId: artifact.id, fileId: exported.fileId || null, filePath: exported.filePath || null, sourceKey: exported.sourceKey || null }); }
-    } catch (err: any) { this.record(run, "artifact.export_failed", "archivist", `Failed to export ${artifact.kind} artifact`, { artifactId: artifact.id, error: err?.message || String(err) }); }
-  }
-
-  private advanceSkeleton(run: UltraworkRun, actor: string) {
-    const now = new Date().toISOString();
-    for (const step of run.steps) if (step.status !== "completed" && step.status !== "cancelled") { step.status = "completed"; step.updatedAt = now; step.notes = appendNote(step.notes, "Skeleton lifecycle advanced this step; real tool execution is not wired yet."); this.record(run, "step.completed", step.agent, `Completed step: ${step.title}`, { stepId: step.id, kind: step.kind, actor }); }
-    for (const packet of run.workPackets || []) if (packet.status !== "completed" && packet.status !== "cancelled") { packet.status = "completed"; packet.updatedAt = now; packet.notes = appendNote(packet.notes, "Skeleton lifecycle marked this packet complete; real delegated execution is not wired yet."); this.record(run, "work_packet.completed", packet.agent, `Completed work packet: ${packet.title}`, { packetId: packet.id, kind: packet.kind, actor, runner: "skeleton" }); }
-    this.maybeCompleteRun(run);
-  }
-
-  private maybeCompleteRun(run: UltraworkRun) {
-    const packets = run.workPackets || [];
-    if (packets.length && packets.every((packet) => isTerminalStatus(packet.status))) {
-      const now = new Date().toISOString();
-      for (const step of run.steps) if (step.status !== "completed" && step.status !== "cancelled") { step.status = "completed"; step.updatedAt = now; }
-      run.status = packets.some((packet) => packet.status === "failed") ? "failed" : "completed";
-      this.record(run, run.status === "failed" ? "run.failed" : "run.completed", "reviewer", run.status === "failed" ? "Failed skeleton Ultrawork run after packet lifecycle advancement" : "Completed skeleton Ultrawork run after packet lifecycle advancement", { caveat: "This is a skeleton completion. Tool execution, memory writes, file mutation, and PR creation are still gated future work." });
-    }
-  }
-
-  private publishActivity(run: UltraworkRun) {
-    if (!this.activityHub || typeof this.activityHub.upsert !== "function") return;
-    const parentTaskId = `ultrawork:${run.id}`; const startedAt = toMs(run.createdAt); const finishedAt = isTerminalStatus(run.status) ? toMs(run.updatedAt) : null;
-    this.activityHub.upsert({ id: parentTaskId, kind: "workflow", status: toActivityStatus(run.status), sessionPath: run.sessionPath, agentId: "hana", agentName: "Hana", summary: `Omni Ultrawork · ${run.goal}`, label: `${run.mode} · ${run.intent}`, access: run.mode, startedAt, finishedAt });
-    for (const agent of run.agents) this.activityHub.upsert({ id: `${parentTaskId}:agent:${agent.id}`, kind: "workflow_agent", status: toActivityStatus(run.status), sessionPath: run.sessionPath, agentId: agent.id, agentName: agent.name, summary: agent.mission, label: agent.name, access: agent.autonomy, parentTaskId, phaseLabel: `${run.mode} · ${run.intent}`, startedAt, finishedAt });
-    for (const [idx, step] of run.steps.entries()) this.activityHub.upsert({ id: `${parentTaskId}:step:${step.id}`, kind: "workflow_step", status: toActivityStatus(step.status), sessionPath: run.sessionPath, agentId: step.agent, agentName: displayNameForAgent(step.agent), summary: step.notes || step.title, label: `${idx + 1}. ${step.title}`, access: step.requiresConfirmation ? "confirm" : run.mode, parentTaskId, phaseLabel: step.agent, stepKind: step.kind, startedAt: toMs(step.createdAt), finishedAt: isTerminalStatus(step.status) ? toMs(step.updatedAt) : null });
-    for (const [idx, packet] of (run.workPackets || []).entries()) this.activityHub.upsert({ id: `${parentTaskId}:packet:${packet.id}`, kind: "workflow_step", status: toActivityStatus(packet.status), sessionPath: run.sessionPath, agentId: packet.agent, agentName: displayNameForAgent(packet.agent), summary: packet.objective, label: `Packet ${idx + 1}. ${packet.title}`, access: packet.confirmationGates.length ? "confirm" : run.mode, parentTaskId, phaseLabel: packet.agent, stepKind: "work_packet", runner: this.packetRunnerRegistry.get(packet.kind)?.name || null, startedAt: toMs(packet.createdAt), finishedAt: isTerminalStatus(packet.status) ? toMs(packet.updatedAt) : null });
-  }
-
+  private async generateArtifact(run: UltraworkRun, kind: "plan" | "review", title: string, agent: UltraworkAgentRole, fallbackContent: string) { let content = fallbackContent; let source: UltraworkArtifact["source"] = "deterministic"; let model: string | null = null; if (this.textGenerator) { try { const result = await this.textGenerator({ kind, run }); const text = typeof result === "string" ? result : result?.text; if (typeof text === "string" && text.trim()) { content = text.trim(); source = "utility"; model = typeof result === "object" && result?.model ? result.model : null; } } catch (err: any) { this.record(run, "artifact.generation_failed", agent, `Failed to generate ${kind} artifact; using deterministic fallback`, { error: err?.message || String(err) }); } } const artifact = await this.addArtifact(run, { kind, title, agent, content, source, model }); this.record(run, "artifact.generated", agent, `Generated ${kind} artifact`, { artifactId: artifact.id, source, model }); return artifact; }
+  private async addRunnerArtifacts(run: UltraworkRun, packet: UltraworkWorkPacket, runner: string, artifacts: UltraworkArtifactDraft[]) { const added: UltraworkArtifact[] = []; for (const draft of artifacts) { const artifact = await this.addArtifact(run, draft); added.push(artifact); this.record(run, "artifact.generated", packet.agent, `Generated runner artifact: ${artifact.title}`, { artifactId: artifact.id, packetId: packet.id, runner, source: artifact.source }); } return added; }
+  private async addArtifact(run: UltraworkRun, draft: UltraworkArtifactDraft) { const artifact: UltraworkArtifact = { id: draft.id || crypto.randomUUID(), kind: draft.kind, title: draft.title, agent: draft.agent, content: draft.content, source: draft.source, model: draft.model || null, createdAt: draft.createdAt || new Date().toISOString() }; run.artifacts.push(artifact); await this.exportArtifact(run, artifact); return artifact; }
+  private async exportArtifact(run: UltraworkRun, artifact: UltraworkArtifact) { if (!this.artifactExporter || !run.sessionPath) return; try { const exported = await this.artifactExporter({ run, artifact }); if (exported) { artifact.exportedFile = exported; this.record(run, "artifact.exported", "archivist", `Exported ${artifact.kind} artifact to session file`, { artifactId: artifact.id, fileId: exported.fileId || null, filePath: exported.filePath || null, sourceKey: exported.sourceKey || null }); } } catch (err: any) { this.record(run, "artifact.export_failed", "archivist", `Failed to export ${artifact.kind} artifact`, { artifactId: artifact.id, error: err?.message || String(err) }); } }
+  private advanceSkeleton(run: UltraworkRun, actor: string) { const now = new Date().toISOString(); for (const step of run.steps) if (step.status !== "completed" && step.status !== "cancelled") { step.status = "completed"; step.updatedAt = now; step.notes = appendNote(step.notes, "Skeleton lifecycle advanced this step; real tool execution is not wired yet."); this.record(run, "step.completed", step.agent, `Completed step: ${step.title}`, { stepId: step.id, kind: step.kind, actor }); } for (const packet of run.workPackets || []) if (packet.status !== "completed" && packet.status !== "cancelled") { packet.status = "completed"; packet.updatedAt = now; packet.notes = appendNote(packet.notes, "Skeleton lifecycle marked this packet complete; real delegated execution is not wired yet."); this.record(run, "work_packet.completed", packet.agent, `Completed work packet: ${packet.title}`, { packetId: packet.id, kind: packet.kind, actor, runner: "skeleton" }); } this.maybeCompleteRun(run); }
+  private maybeCompleteRun(run: UltraworkRun) { const packets = run.workPackets || []; if (packets.length && packets.every((packet) => isTerminalStatus(packet.status))) { const now = new Date().toISOString(); for (const step of run.steps) if (step.status !== "completed" && step.status !== "cancelled") { step.status = "completed"; step.updatedAt = now; } run.status = packets.some((packet) => packet.status === "failed") ? "failed" : "completed"; this.record(run, run.status === "failed" ? "run.failed" : "run.completed", "reviewer", run.status === "failed" ? "Failed skeleton Ultrawork run after packet lifecycle advancement" : "Completed skeleton Ultrawork run after packet lifecycle advancement", { caveat: "This is a skeleton completion. Tool execution, memory writes, file mutation, and PR creation are still gated future work." }); } }
+  private publishActivity(run: UltraworkRun) { const activityHub = this.getActivityHub(); if (!activityHub || typeof activityHub.upsert !== "function") return; const parentTaskId = `ultrawork:${run.id}`; const startedAt = toMs(run.createdAt); const finishedAt = isTerminalStatus(run.status) ? toMs(run.updatedAt) : null; activityHub.upsert({ id: parentTaskId, kind: "workflow", status: toActivityStatus(run.status), sessionPath: run.sessionPath, agentId: "hana", agentName: "Hana", summary: `Omni Ultrawork · ${run.goal}`, label: `${run.mode} · ${run.intent}`, access: run.mode, startedAt, finishedAt }); for (const agent of run.agents) activityHub.upsert({ id: `${parentTaskId}:agent:${agent.id}`, kind: "workflow_agent", status: toActivityStatus(run.status), sessionPath: run.sessionPath, agentId: agent.id, agentName: agent.name, summary: agent.mission, label: agent.name, access: agent.autonomy, parentTaskId, phaseLabel: `${run.mode} · ${run.intent}`, startedAt, finishedAt }); for (const [idx, step] of run.steps.entries()) activityHub.upsert({ id: `${parentTaskId}:step:${step.id}`, kind: "workflow_step", status: toActivityStatus(step.status), sessionPath: run.sessionPath, agentId: step.agent, agentName: displayNameForAgent(step.agent), summary: step.notes || step.title, label: `${idx + 1}. ${step.title}`, access: step.requiresConfirmation ? "confirm" : run.mode, parentTaskId, phaseLabel: step.agent, stepKind: step.kind, startedAt: toMs(step.createdAt), finishedAt: isTerminalStatus(step.status) ? toMs(step.updatedAt) : null }); for (const [idx, packet] of (run.workPackets || []).entries()) activityHub.upsert({ id: `${parentTaskId}:packet:${packet.id}`, kind: "workflow_step", status: toActivityStatus(packet.status), sessionPath: run.sessionPath, agentId: packet.agent, agentName: displayNameForAgent(packet.agent), summary: packet.objective, label: `Packet ${idx + 1}. ${packet.title}`, access: packet.confirmationGates.length ? "confirm" : run.mode, parentTaskId, phaseLabel: packet.agent, stepKind: "work_packet", runner: this.packetRunnerRegistry.get(packet.kind)?.name || null, startedAt: toMs(packet.createdAt), finishedAt: isTerminalStatus(packet.status) ? toMs(packet.updatedAt) : null }); }
   private requireRun(id: string) { const run = this.getRun(id); if (!run) throw new Error("ultrawork_run_not_found"); return run; }
   private assertMutable(run: UltraworkRun) { if (run.status === "cancelled") throw new Error("ultrawork_run_cancelled"); if (run.status === "failed") throw new Error("ultrawork_run_failed"); }
   private record(run: UltraworkRun, type: string, actor: string, message: string, data?: Record<string, any>) { run.audit.push({ id: crypto.randomUUID(), at: new Date().toISOString(), type, actor, message, data }); run.updatedAt = new Date().toISOString(); }
