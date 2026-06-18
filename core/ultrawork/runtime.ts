@@ -4,6 +4,7 @@ import path from "path";
 
 export const ULTRAWORK_MODES = ["safe", "auto", "godmode"] as const;
 export const ULTRAWORK_INTENTS = ["coding", "product", "research", "personal_ops", "mixed"] as const;
+export const ULTRAWORK_WORK_PACKET_KINDS = ["coding", "product", "research", "personal_ops", "review", "archive"] as const;
 
 export type UltraworkMode = typeof ULTRAWORK_MODES[number];
 export type UltraworkIntent = typeof ULTRAWORK_INTENTS[number];
@@ -11,7 +12,7 @@ export type UltraworkStatus = "queued" | "running" | "waiting_confirmation" | "c
 export type UltraworkAgentRole = "hana" | "planner" | "researcher" | "coder" | "operator" | "reviewer" | "archivist";
 export type UltraworkHookPhase = "before_plan" | "after_plan" | "before_tool" | "after_tool" | "before_mutation" | "after_review";
 export type UltraworkArtifactKind = "plan" | "review" | "note";
-export type UltraworkWorkPacketKind = "coding" | "product" | "research" | "personal_ops" | "review" | "archive";
+export type UltraworkWorkPacketKind = typeof ULTRAWORK_WORK_PACKET_KINDS[number];
 
 export type UltraworkAgentSpec = {
   id: UltraworkAgentRole;
@@ -126,8 +127,51 @@ export type UltraworkTextResult = {
   model?: string | null;
 };
 
+export type UltraworkPacketRunnerInput = {
+  run: UltraworkRun;
+  packet: UltraworkWorkPacket;
+  actor: string;
+  reason?: string | null;
+};
+
+export type UltraworkPacketRunnerResult = {
+  status?: "completed" | "failed";
+  notes?: string;
+  message?: string;
+  data?: Record<string, any>;
+};
+
+export type UltraworkPacketRunner = (input: UltraworkPacketRunnerInput) => UltraworkPacketRunnerResult | null | undefined;
 export type UltraworkTextGenerator = (request: UltraworkTextRequest) => Promise<UltraworkTextResult | string | null | undefined>;
 export type UltraworkArtifactExporter = (request: { run: UltraworkRun; artifact: UltraworkArtifact }) => Promise<UltraworkArtifactExport | null | undefined>;
+
+export class PacketRunnerRegistry {
+  private readonly runners = new Map<UltraworkWorkPacketKind, { name: string; runner: UltraworkPacketRunner }>();
+
+  register(kind: UltraworkWorkPacketKind, name: string, runner: UltraworkPacketRunner) {
+    this.runners.set(kind, { name, runner });
+    return this;
+  }
+
+  get(kind: UltraworkWorkPacketKind) {
+    return this.runners.get(kind) || this.runners.get("review") || null;
+  }
+
+  describe() {
+    return ULTRAWORK_WORK_PACKET_KINDS.map((kind) => ({
+      kind,
+      name: this.runners.get(kind)?.name || null,
+    }));
+  }
+
+  static noop() {
+    const registry = new PacketRunnerRegistry();
+    for (const kind of ULTRAWORK_WORK_PACKET_KINDS) {
+      registry.register(kind, `noop:${kind}`, noopPacketRunner);
+    }
+    return registry;
+  }
+}
 
 export class OmniUltraworkRuntime {
   private runs = new Map<string, UltraworkRun>();
@@ -135,22 +179,26 @@ export class OmniUltraworkRuntime {
   private readonly activityHub: any;
   private readonly textGenerator: UltraworkTextGenerator | null;
   private readonly artifactExporter: UltraworkArtifactExporter | null;
+  private readonly packetRunnerRegistry: PacketRunnerRegistry;
 
   constructor({
     hanakoHome,
     activityHub = null,
     textGenerator = null,
     artifactExporter = null,
+    packetRunnerRegistry = null,
   }: {
     hanakoHome: string;
     activityHub?: any;
     textGenerator?: UltraworkTextGenerator | null;
     artifactExporter?: UltraworkArtifactExporter | null;
+    packetRunnerRegistry?: PacketRunnerRegistry | null;
   }) {
     this.storePath = path.join(hanakoHome, "ultrawork", "runs.json");
     this.activityHub = activityHub || null;
     this.textGenerator = typeof textGenerator === "function" ? textGenerator : null;
     this.artifactExporter = typeof artifactExporter === "function" ? artifactExporter : null;
+    this.packetRunnerRegistry = packetRunnerRegistry || PacketRunnerRegistry.noop();
     this.load();
   }
 
@@ -170,10 +218,11 @@ export class OmniUltraworkRuntime {
       actions: ["confirm", "continue", "cancel", "run-packet", "run-next-packet"],
       activityKinds: ["workflow", "workflow_agent", "workflow_step"],
       artifactKinds: ["plan", "review", "note"],
-      workPacketKinds: ["coding", "product", "research", "personal_ops", "review", "archive"],
+      workPacketKinds: ULTRAWORK_WORK_PACKET_KINDS,
+      packetRunners: this.packetRunnerRegistry.describe(),
       textGeneration: !!this.textGenerator,
       artifactExport: !!this.artifactExporter,
-      packetRunner: "noop",
+      packetRunner: "registry",
     };
   }
 
@@ -308,26 +357,43 @@ export class OmniUltraworkRuntime {
       return run;
     }
 
+    const entry = this.packetRunnerRegistry.get(packet.kind);
+    if (!entry) throw new Error("ultrawork_packet_runner_not_found");
     const now = new Date().toISOString();
+    const actor = input.actor || "hana";
     run.status = "running";
     packet.status = "running";
     packet.updatedAt = now;
     this.record(run, "work_packet.started", packet.agent, `Started work packet: ${packet.title}`, {
       packetId: packet.id,
       kind: packet.kind,
-      actor: input.actor || "hana",
-      runner: "noop",
+      actor,
+      runner: entry.name,
     });
 
-    packet.status = "completed";
+    let result: UltraworkPacketRunnerResult | null | undefined;
+    try {
+      result = entry.runner({ run, packet, actor, reason: input.reason || null });
+    } catch (err: any) {
+      result = {
+        status: "failed",
+        notes: `Packet runner failed: ${err?.message || String(err)}`,
+        message: "Packet runner failed",
+        data: { error: err?.message || String(err) },
+      };
+    }
+
+    const nextStatus = result?.status === "failed" ? "failed" : "completed";
+    packet.status = nextStatus;
     packet.updatedAt = new Date().toISOString();
-    packet.notes = appendNote(packet.notes, "No-op packet runner completed this packet. Real tool execution is not wired yet.");
-    this.record(run, "work_packet.completed", packet.agent, `Completed work packet: ${packet.title}`, {
+    packet.notes = appendNote(packet.notes, result?.notes || `Packet runner ${entry.name} completed this packet.`);
+    this.record(run, nextStatus === "failed" ? "work_packet.failed" : "work_packet.completed", packet.agent, result?.message || `${nextStatus === "failed" ? "Failed" : "Completed"} work packet: ${packet.title}`, {
       packetId: packet.id,
       kind: packet.kind,
-      actor: input.actor || "hana",
-      runner: "noop",
+      actor,
+      runner: entry.name,
       confirmationGates: packet.confirmationGates,
+      ...(result?.data || {}),
     });
 
     this.maybeCompleteRun(run);
@@ -486,8 +552,8 @@ export class OmniUltraworkRuntime {
           step.updatedAt = now;
         }
       }
-      run.status = "completed";
-      this.record(run, "run.completed", "reviewer", "Completed skeleton Ultrawork run after packet lifecycle advancement", {
+      run.status = packets.some((packet) => packet.status === "failed") ? "failed" : "completed";
+      this.record(run, run.status === "failed" ? "run.failed" : "run.completed", "reviewer", run.status === "failed" ? "Failed skeleton Ultrawork run after packet lifecycle advancement" : "Completed skeleton Ultrawork run after packet lifecycle advancement", {
         caveat: "This is a skeleton completion. Tool execution, memory writes, file mutation, and PR creation are still gated future work.",
       });
     }
@@ -560,6 +626,7 @@ export class OmniUltraworkRuntime {
         parentTaskId,
         phaseLabel: packet.agent,
         stepKind: "work_packet",
+        runner: this.packetRunnerRegistry.get(packet.kind)?.name || null,
         startedAt: toMs(packet.createdAt),
         finishedAt: isTerminalStatus(packet.status) ? toMs(packet.updatedAt) : null,
       });
@@ -610,6 +677,15 @@ export class OmniUltraworkRuntime {
     fs.mkdirSync(path.dirname(this.storePath), { recursive: true });
     fs.writeFileSync(this.storePath, JSON.stringify({ runs: this.listRuns({ limit: 200 }) }, null, 2));
   }
+}
+
+function noopPacketRunner({ packet }: UltraworkPacketRunnerInput): UltraworkPacketRunnerResult {
+  return {
+    status: "completed",
+    notes: `No-op ${packet.kind} runner completed this packet. Real tool execution is not wired yet.`,
+    message: `Completed work packet: ${packet.title}`,
+    data: { runnerKind: packet.kind },
+  };
 }
 
 function normalizeMode(value: string | undefined): UltraworkMode {
