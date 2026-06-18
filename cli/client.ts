@@ -63,6 +63,25 @@ export class HanaCliClient {
     });
   }
 
+  ultraworkCapabilities() {
+    return this.request("/api/ultrawork/capabilities");
+  }
+
+  ultraworkRuns({ limit = 20 } = {}) {
+    return this.request(`/api/ultrawork/runs?limit=${encodeURIComponent(String(limit))}`);
+  }
+
+  startUltrawork({ goal, mode = "auto", sessionPath = null, agents = [] }) {
+    return this.request("/api/ultrawork/runs", {
+      method: "POST",
+      body: { goal, mode, sessionPath, agents },
+    });
+  }
+
+  getUltraworkRun(id) {
+    return this.request(`/api/ultrawork/runs/${encodeURIComponent(id)}`);
+  }
+
   createWebSocket() {
     const url = new URL(this.baseUrl.replace(/^http/i, "ws"));
     url.pathname = "/ws";
