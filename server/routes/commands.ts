@@ -37,8 +37,9 @@ export function createCommandsRoute(engine) {
       }));
       return c.json({ commands: defs });
     } catch (err) {
-      log.error(`list failed: ${err.message}`);
-      return c.json({ error: err.message }, 500);
+      const message = errorMessage(err);
+      log.error(`list failed: ${message}`);
+      return c.json({ error: message }, 500);
     }
   });
 
@@ -215,4 +216,14 @@ function modelLabel(model) {
   if (!model) return null;
   if (typeof model === "string") return model;
   return model.name || model.id || null;
+}
+
+function errorMessage(err) {
+  if (err instanceof Error) return err.message;
+  if (typeof err === "string") return err;
+  try {
+    return JSON.stringify(err);
+  } catch {
+    return "unknown_error";
+  }
 }
