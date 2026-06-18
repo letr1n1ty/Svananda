@@ -38,5 +38,32 @@ export function createUltraworkRoute(runtime) {
     }
   });
 
+  route.post("/ultrawork/runs/:id/confirm", async (c) => {
+    return action(c, "confirm", (id, body) => runtime.confirmRun(id, body));
+  });
+
+  route.post("/ultrawork/runs/:id/continue", async (c) => {
+    return action(c, "continue", (id, body) => runtime.continueRun(id, body));
+  });
+
+  route.post("/ultrawork/runs/:id/cancel", async (c) => {
+    return action(c, "cancel", (id, body) => runtime.cancelRun(id, body));
+  });
+
+  async function action(c, name, fn) {
+    try {
+      const body = await safeJson(c).catch(() => ({}));
+      const run = fn(c.req.param("id"), {
+        actor: body.actor || "cli",
+        reason: body.reason || null,
+      });
+      return c.json({ ok: true, run });
+    } catch (err) {
+      const status = err.message === "ultrawork_run_not_found" ? 404 : 409;
+      log.error(`${name} failed: ${err.message}`);
+      return c.json({ ok: false, error: err.message }, status);
+    }
+  }
+
   return route;
 }
