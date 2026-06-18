@@ -1,6 +1,6 @@
 # Omni Ultrawork MVP
 
-Omni Ultrawork is the Svananda counterpart to an agent-harness `ultrawork` mode: one user goal enters the system, then Hana routes intent, selects specialist agents, applies a permission profile, creates a resumable execution graph, broadcasts activity, and persists an audit trail.
+Omni Ultrawork is the Svananda counterpart to an agent-harness `ultrawork` mode: one user goal enters the system, then Hana routes intent, selects specialist agents, applies a permission profile, creates a resumable execution graph, generates plan/review artifacts, broadcasts activity, and persists an audit trail.
 
 ## CLI
 
@@ -60,12 +60,23 @@ Action body:
 
 | Action | Meaning |
 | --- | --- |
-| `start` | Creates a run, intent route, agent roster, permission profile, step graph, and audit trail. |
+| `start` | Creates a run, intent route, agent roster, permission profile, step graph, artifacts, and audit trail. |
 | `confirm` | Confirms a waiting safe-mode run and advances the skeleton execution graph. |
 | `continue` | Advances a queued or running run. Waiting safe-mode runs remain blocked until confirmation. |
 | `cancel` | Cancels non-completed runs and marks unfinished steps as cancelled. |
 | `show` | Reads one persisted run. |
 | `list` | Lists recent persisted runs. |
+
+## Artifacts
+
+Each run can include generated artifacts. The initial MVP creates two artifacts at run creation:
+
+| Artifact | Agent | Source |
+| --- | --- | --- |
+| `plan` | Kannon / planner | Utility model when available, deterministic fallback otherwise. |
+| `review` | Miroku / reviewer | Utility model when available, deterministic fallback otherwise. |
+
+Artifacts are persisted inside the run record and shown by `hana ultrawork show <run-id>`. They intentionally do not claim that tools were executed.
 
 ## ActivityHub mapping
 
@@ -100,7 +111,7 @@ Status mapping:
 
 ## Current scope
 
-This PR establishes the transport, data model, permission profile, deterministic intent routing, agent selection, execution graph, persistent audit log, explicit run lifecycle actions, and ActivityHub publication. It intentionally does not yet wire real tool execution, memory writes, PR creation, or background continuation.
+This PR establishes the transport, data model, permission profile, deterministic intent routing, agent selection, execution graph, generated plan/review artifacts, persistent audit log, explicit run lifecycle actions, and ActivityHub publication. It intentionally does not yet wire real tool execution, memory writes, PR creation, or background continuation.
 
 The audit store is persisted at:
 
@@ -117,7 +128,7 @@ $HANA_HOME/workflow-activity.json
 ## Next PRs
 
 1. Add a Desktop Ultrawork panel/card backed by the existing `agent_activity` stream.
-2. Wire `utility:call-text` for planner/reviewer synthesis.
-3. Add real delegated work packets for coding, research, product, and personal ops.
-4. Add permission-gated file mutation and PR creation.
-5. Add background continuation with explicit scheduler bounds.
+2. Add real delegated work packets for coding, research, product, and personal ops.
+3. Add permission-gated file mutation and PR creation.
+4. Add background continuation with explicit scheduler bounds.
+5. Add artifact export into session files.
