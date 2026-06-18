@@ -25,7 +25,7 @@ export function createUltraworkRoute(runtime) {
   route.post("/ultrawork/runs", async (c) => {
     try {
       const body = await safeJson(c);
-      const run = runtime.startRun({
+      const run = await runtime.startRun({
         goal: body.goal,
         mode: body.mode,
         sessionPath: body.sessionPath,
