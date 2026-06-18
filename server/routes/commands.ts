@@ -1,4 +1,3 @@
-import crypto from "crypto";
 import fs from "fs";
 import path from "path";
 import { Hono } from "hono";
@@ -48,26 +47,25 @@ export function createCommandsRoute(engine) {
 
 function createUltraworkPacketRunnerRegistry() {
   return PacketRunnerRegistry.noop().register("coding", "coding:skeleton-impact-map", ({ run, packet }) => {
-    const artifact = {
-      id: crypto.randomUUID(),
-      kind: "note",
-      title: `Coding impact map · ${packet.title}`,
-      agent: packet.agent,
-      content: renderCodingPacketArtifact(run, packet),
-      source: "system",
-      createdAt: new Date().toISOString(),
-    };
-    run.artifacts.push(artifact);
+    const title = `Coding impact map · ${packet.title}`;
     return {
       status: "completed",
-      notes: `Coding runner skeleton produced ${artifact.title}. No files were read, written, or mutated.`,
+      notes: `Coding runner skeleton produced ${title}. No files were read, written, or mutated.`,
       message: `Completed coding packet skeleton: ${packet.title}`,
       data: {
         runnerKind: "coding",
-        producedArtifactId: artifact.id,
-        producedArtifactTitle: artifact.title,
+        producedArtifactTitle: title,
         mutationPerformed: false,
       },
+      artifacts: [
+        {
+          kind: "note",
+          title,
+          agent: packet.agent,
+          content: renderCodingPacketArtifact(run, packet),
+          source: "system",
+        },
+      ],
     };
   });
 }
