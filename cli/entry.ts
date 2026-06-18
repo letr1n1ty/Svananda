@@ -6,6 +6,7 @@ import { parseCliArgs, helpText } from "./args.ts";
 import { resolveConnection } from "./local-server.ts";
 import { HanaCliClient } from "./client.ts";
 import { printSessions, printStatus, startChat } from "./chat.ts";
+import { runUltrawork } from "./ultrawork.ts";
 import { spawnServerForeground, startLocalServerAndWait } from "./server-runner.ts";
 import { ansi } from "./terminal-theme.ts";
 
@@ -61,6 +62,9 @@ export async function main(argv = process.argv.slice(2)) {
     await startChat(client, connection, { session: args.session, plain: args.plain });
     return 0;
   }
+  if (args.command === "ultrawork") {
+    return await runUltrawork(client, connection, args);
+  }
 
   console.log(helpText());
   return 0;
@@ -68,7 +72,7 @@ export async function main(argv = process.argv.slice(2)) {
 
 function shouldAutoStartServer(args) {
   if (args.url) return false;
-  return args.command === "chat" || args.command === "continue";
+  return args.command === "chat" || args.command === "continue" || args.command === "ultrawork";
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
