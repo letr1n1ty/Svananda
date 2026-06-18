@@ -31,8 +31,9 @@ export function createUltraworkRoute(runtime) {
       });
       return c.json({ ok: true, run });
     } catch (err) {
-      log.error(`start failed: ${err.message}`);
-      return c.json({ ok: false, error: err.message }, 400);
+      const message = errorMessage(err);
+      log.error(`start failed: ${message}`);
+      return c.json({ ok: false, error: message }, 400);
     }
   });
 
@@ -52,11 +53,22 @@ export function createUltraworkRoute(runtime) {
       });
       return c.json({ ok: true, run });
     } catch (err) {
-      const status = err.message === "ultrawork_run_not_found" || err.message === "ultrawork_packet_not_found" ? 404 : 409;
-      log.error(`${name} failed: ${err.message}`);
-      return c.json({ ok: false, error: err.message }, status);
+      const message = errorMessage(err);
+      const status = message === "ultrawork_run_not_found" || message === "ultrawork_packet_not_found" ? 404 : 409;
+      log.error(`${name} failed: ${message}`);
+      return c.json({ ok: false, error: message }, status);
     }
   }
 
   return route;
+}
+
+function errorMessage(err) {
+  if (err instanceof Error) return err.message;
+  if (typeof err === "string") return err;
+  try {
+    return JSON.stringify(err);
+  } catch {
+    return "unknown_error";
+  }
 }
