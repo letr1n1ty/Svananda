@@ -1,6 +1,6 @@
 # Omni Ultrawork MVP
 
-Omni Ultrawork is the Svananda counterpart to an agent-harness `ultrawork` mode: one user goal enters the system, then Hana routes intent, selects specialist agents, applies a permission profile, creates a resumable execution graph, and persists an audit trail.
+Omni Ultrawork is the Svananda counterpart to an agent-harness `ultrawork` mode: one user goal enters the system, then Hana routes intent, selects specialist agents, applies a permission profile, creates a resumable execution graph, broadcasts activity, and persists an audit trail.
 
 ## CLI
 
@@ -67,6 +67,25 @@ Action body:
 | `show` | Reads one persisted run. |
 | `list` | Lists recent persisted runs. |
 
+## ActivityHub mapping
+
+Ultrawork publishes activity into the existing ActivityHub contract instead of adding a separate desktop protocol.
+
+| Ultrawork object | Activity kind | Notes |
+| --- | --- | --- |
+| Run | `workflow` | Parent task: `ultrawork:<run-id>`. |
+| Agent role | `workflow_agent` | Child entries under the run, one per selected agent. |
+| Step | `workflow_step` | Child entries under the run, one per execution-graph step. |
+
+Status mapping:
+
+| Ultrawork status | ActivityHub status |
+| --- | --- |
+| `queued`, `running`, `waiting_confirmation` | `running` |
+| `completed` | `done` |
+| `failed` | `failed` |
+| `cancelled` | `aborted` |
+
 ## Agent roster
 
 | Agent | Role | Mission |
@@ -81,7 +100,7 @@ Action body:
 
 ## Current scope
 
-This PR establishes the transport, data model, permission profile, deterministic intent routing, agent selection, execution graph, persistent audit log, and explicit run lifecycle actions. It intentionally does not yet wire real tool execution, memory writes, PR creation, or background continuation.
+This PR establishes the transport, data model, permission profile, deterministic intent routing, agent selection, execution graph, persistent audit log, explicit run lifecycle actions, and ActivityHub publication. It intentionally does not yet wire real tool execution, memory writes, PR creation, or background continuation.
 
 The audit store is persisted at:
 
@@ -89,9 +108,15 @@ The audit store is persisted at:
 $HANA_HOME/ultrawork/runs.json
 ```
 
+ActivityHub persistence follows the existing workflow activity store:
+
+```txt
+$HANA_HOME/workflow-activity.json
+```
+
 ## Next PRs
 
-1. Bind Ultrawork steps to the existing activity hub so Desktop can render live status.
+1. Add a Desktop Ultrawork panel/card backed by the existing `agent_activity` stream.
 2. Wire `utility:call-text` for planner/reviewer synthesis.
 3. Add real delegated work packets for coding, research, product, and personal ops.
 4. Add permission-gated file mutation and PR creation.
