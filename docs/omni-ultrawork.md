@@ -1,6 +1,6 @@
 # Omni Ultrawork MVP
 
-Omni Ultrawork is the Svananda counterpart to an agent-harness `ultrawork` mode: one user goal enters the system, then Hana routes intent, selects specialist agents, applies a permission profile, creates a resumable execution graph, generates delegated work packets, generates plan/review artifacts, exports artifacts to session files, broadcasts activity, and persists an audit trail.
+Omni Ultrawork is the Svananda counterpart to an agent-harness `ultrawork` mode: one user goal enters the system, then Hana routes intent, selects specialist agents, applies a permission profile, creates a resumable execution graph, generates delegated work packets, runs packets through a no-op runner, generates plan/review artifacts, exports artifacts to session files, broadcasts activity, and persists an audit trail.
 
 ## CLI
 
@@ -12,6 +12,8 @@ hana ultrawork "finish the whole feature with tests" --godmode --json
 hana ultrawork list
 hana ultrawork show <run-id>
 hana ultrawork confirm <run-id> --reason "approved plan"
+hana ultrawork run-next-packet <run-id>
+hana ultrawork run-packet <run-id> <packet-id>
 hana ultrawork continue <run-id>
 hana ultrawork cancel <run-id> --reason "wrong scope"
 ```
@@ -26,6 +28,8 @@ POST /api/ultrawork/runs
 POST /api/ultrawork/runs/:id/confirm
 POST /api/ultrawork/runs/:id/continue
 POST /api/ultrawork/runs/:id/cancel
+POST /api/ultrawork/runs/:id/packets/next/run
+POST /api/ultrawork/runs/:id/packets/:packetId/run
 ```
 
 Example body:
@@ -61,15 +65,17 @@ Action body:
 | Action | Meaning |
 | --- | --- |
 | `start` | Creates a run, intent route, agent roster, permission profile, step graph, delegated work packets, artifacts, exported artifact session files when a session exists, and audit trail. |
-| `confirm` | Confirms a waiting safe-mode run and advances the skeleton execution graph. |
-| `continue` | Advances a queued or running run. Waiting safe-mode runs remain blocked until confirmation. |
+| `confirm` | Confirms a waiting safe-mode run. It does not execute packets. |
+| `run-next-packet` | Runs the first non-terminal packet through the no-op packet runner. |
+| `run-packet` | Runs one packet by id through the no-op packet runner. |
+| `continue` | Completes the skeleton run and all remaining packets. Waiting safe-mode runs remain blocked until confirmation. |
 | `cancel` | Cancels non-completed runs and marks unfinished steps/work packets as cancelled. |
 | `show` | Reads one persisted run. |
 | `list` | Lists recent persisted runs. |
 
 ## Work packets
 
-Work packets are structured handoff units between planning and real tool execution. They do not execute tools yet. They make delegation explicit so later PRs can bind packets to concrete tool runners.
+Work packets are structured handoff units between planning and real tool execution. They make delegation explicit so later PRs can bind packets to concrete tool runners.
 
 | Packet kind | Agent | Purpose |
 | --- | --- | --- |
@@ -81,6 +87,8 @@ Work packets are structured handoff units between planning and real tool executi
 | `archive` | Archivist | Audit log, artifact references, resume summary, approved memory candidates. |
 
 Each packet records objective, inputs, deliverables, confirmation gates, status, source, and owning agent. Packets are shown in `hana ultrawork show <run-id>` and listed in `hana ultrawork list` counts.
+
+The MVP packet runner is intentionally a no-op runner. It only updates packet status, audit events, and ActivityHub state. It does not execute tools, mutate files, send messages, write memory, or open pull requests.
 
 ## Artifacts
 
@@ -135,7 +143,7 @@ Status mapping:
 
 ## Current scope
 
-This PR establishes the transport, data model, permission profile, deterministic intent routing, agent selection, execution graph, delegated work packets, generated plan/review artifacts, exported artifact session files, persistent audit log, explicit run lifecycle actions, and ActivityHub publication. It intentionally does not yet wire real tool execution, memory writes, PR creation, or background continuation.
+This PR establishes the transport, data model, permission profile, deterministic intent routing, agent selection, execution graph, delegated work packets, no-op packet runner, generated plan/review artifacts, exported artifact session files, persistent audit log, explicit run lifecycle actions, and ActivityHub publication. It intentionally does not yet wire real tool execution, memory writes, PR creation, or background continuation.
 
 The audit store is persisted at:
 
