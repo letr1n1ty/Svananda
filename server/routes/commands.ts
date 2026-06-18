@@ -1,7 +1,13 @@
+import fs from "fs";
+import path from "path";
 import { Hono } from "hono";
 import { createModuleLogger } from "../../lib/debug-log.ts";
 import { OmniUltraworkRuntime } from "../../core/ultrawork/runtime.ts";
 import { callText } from "../../core/llm-client.ts";
+import {
+  buildSessionFileSourceKey,
+  sessionFilesCacheDir,
+} from "../../lib/session-files/session-file-registry.ts";
 import { createUltraworkRoute } from "./ultrawork.ts";
 
 const log = createModuleLogger("commands");
@@ -12,6 +18,7 @@ export function createCommandsRoute(engine) {
     hanakoHome: engine.hanakoHome,
     activityHub: engine.activityHub,
     textGenerator: createUltraworkTextGenerator(engine),
+    artifactExporter: createUltraworkArtifactExporter(engine),
   });
   route.route("", createUltraworkRoute(ultraworkRuntime));
 
@@ -72,6 +79,34 @@ function createUltraworkTextGenerator(engine) {
   };
 }
 
+function createUltraworkArtifactExporter(engine) {
+  return async ({ run, artifact }) => {
+    if (!run.sessionPath) return null;
+    const dir = path.join(sessionFilesCacheDir(engine.hanakoHome, run.sessionPath), "ultrawork", run.id);
+    fs.mkdirSync(dir, { recursive: true });
+    const filename = `${artifact.kind}-${safeFilename(artifact.title || artifact.id)}.md`;
+    const filePath = path.join(dir, filename);
+    fs.writeFileSync(filePath, renderArtifactMarkdown(run, artifact), "utf-8");
+    const sourceKey = buildSessionFileSourceKey("ultrawork-artifact", [run.id, artifact.id, artifact.kind]);
+    const entry = engine.recordSessionFileOperation({
+      sessionPath: run.sessionPath,
+      filePath,
+      label: `Ultrawork ${artifact.kind}: ${artifact.title}`,
+      origin: "agent_artifact",
+      operation: "created",
+      storageKind: "managed_cache",
+      presentation: "attachment",
+      sourceKey,
+    });
+    return {
+      fileId: entry?.id || null,
+      filePath: entry?.filePath || filePath,
+      displayName: entry?.displayName || filename,
+      sourceKey,
+    };
+  };
+}
+
 function buildUltraworkSystemPrompt(kind) {
   if (kind === "review") {
     return "You are Miroku, the Ultrawork reviewer. Review the run for correctness, privacy, side effects, and permission-boundary violations. Be concrete and concise.";
@@ -84,6 +119,35 @@ function buildUltraworkUserPrompt(kind, run) {
   const steps = run.steps.map((step, index) => `- ${index + 1}. ${step.title} | agent=${step.agent} | kind=${step.kind} | status=${step.status} | risk=${step.risk} | confirm=${step.requiresConfirmation}`).join("\n");
   const permissions = Object.entries(run.permissions).map(([key, value]) => `- ${key}: ${Array.isArray(value) ? value.join(", ") : value}`).join("\n");
   return `Generate a ${kind} artifact for this Svananda Omni Ultrawork run.\n\nGoal: ${run.goal}\nMode: ${run.mode}\nIntent: ${run.intent}\nStatus: ${run.status}\nSession: ${run.sessionPath || "none"}\n\nAgents:\n${agents}\n\nExecution graph:\n${steps}\n\nPermission profile:\n${permissions}\n\nOutput requirements:\n- Markdown only.\n- Include concrete next actions.\n- Explicitly call out any actions that require confirmation.\n- Do not claim that tools were executed.\n`;
+}
+
+function renderArtifactMarkdown(run, artifact) {
+  return [
+    `# ${artifact.title}`,
+    "",
+    `- Run: ${run.id}`,
+    `- Goal: ${run.goal}`,
+    `- Mode: ${run.mode}`,
+    `- Intent: ${run.intent}`,
+    `- Agent: ${artifact.agent}`,
+    `- Source: ${artifact.source}`,
+    artifact.model ? `- Model: ${artifact.model}` : null,
+    `- Created: ${artifact.createdAt}`,
+    "",
+    "---",
+    "",
+    artifact.content,
+    "",
+  ].filter(Boolean).join("\n");
+}
+
+function safeFilename(value) {
+  return String(value || "artifact")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 80) || "artifact";
 }
 
 function modelLabel(model) {
