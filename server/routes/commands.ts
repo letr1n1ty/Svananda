@@ -8,11 +8,15 @@
 
 import { Hono } from "hono";
 import { createModuleLogger } from "../../lib/debug-log.ts";
+import { OmniUltraworkRuntime } from "../../core/ultrawork/runtime.ts";
+import { createUltraworkRoute } from "./ultrawork.ts";
 
 const log = createModuleLogger("commands");
 
 export function createCommandsRoute(engine) {
   const route = new Hono();
+  const ultraworkRuntime = new OmniUltraworkRuntime({ hanakoHome: engine.hanakoHome });
+  route.route("", createUltraworkRoute(ultraworkRuntime));
 
   /** GET /commands — 列出所有可见命令，供前端 slash 菜单显示 */
   route.get("/commands", (c) => {
