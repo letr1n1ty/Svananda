@@ -16,7 +16,7 @@ export function createCommandsRoute(engine) {
   const route = new Hono();
   const ultraworkRuntime = new OmniUltraworkRuntime({
     hanakoHome: engine.hanakoHome,
-    activityHub: engine.activityHub,
+    getActivityHub: () => engine.activityHub,
     textGenerator: createUltraworkTextGenerator(engine),
     artifactExporter: createUltraworkArtifactExporter(engine),
     packetRunnerRegistry: createUltraworkPacketRunnerRegistry(),
