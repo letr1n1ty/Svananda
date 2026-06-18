@@ -94,6 +94,20 @@ export class HanaCliClient {
     return this.ultraworkAction(id, "cancel", { reason });
   }
 
+  runNextUltraworkPacket(id, { reason = null } = {}) {
+    return this.request(`/api/ultrawork/runs/${encodeURIComponent(id)}/packets/next/run`, {
+      method: "POST",
+      body: { reason },
+    });
+  }
+
+  runUltraworkPacket(id, packetId, { reason = null } = {}) {
+    return this.request(`/api/ultrawork/runs/${encodeURIComponent(id)}/packets/${encodeURIComponent(packetId)}/run`, {
+      method: "POST",
+      body: { reason },
+    });
+  }
+
   ultraworkAction(id, action, body = {}) {
     return this.request(`/api/ultrawork/runs/${encodeURIComponent(id)}/${action}`, {
       method: "POST",
