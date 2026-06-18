@@ -28,7 +28,6 @@ import { collectMediaItems } from "../lib/tools/media-details.ts";
 import { formatSettingsUpdateText } from "../lib/tools/settings-update-result.ts";
 import { materializeBridgeInboundFiles } from "../lib/session-files/bridge-inbound-files.ts";
 import { serializeSessionFile } from "../lib/session-files/session-file-response.ts";
-import { extractLatestTodosFromEntries } from "../lib/tools/todo-compat.ts";
 
 /**
  * 非桌面来源（bridge /rc 等）用户消息的来源元信息持久化条目类型。
@@ -86,7 +85,7 @@ export async function submitDesktopSessionMessage(engine: any, opts: {
   uiContext?: any;
   context?: any;
 } = {}) {
-  const {
+  let {
     sessionPath,
     text,
     images,
@@ -119,6 +118,7 @@ export async function submitDesktopSessionMessage(engine: any, opts: {
   try {
     const session = await engine.ensureSessionLoaded(sessionPath);
     if (!session) throw new Error(`desktop-session-submit: failed to load session ${sessionPath}`);
+    session.aborted = false;
 
     if (uiContext !== undefined) {
       engine.setUiContext?.(sessionPath, uiContext ?? null);
@@ -252,12 +252,14 @@ export async function submitDesktopSessionMessage(engine: any, opts: {
 你目前正處於「完全自主執行模式（Full Autopilot Mode）」。你必須遵守以下最高指令限制，不得違背：
 1. 嚴禁提問與確認：你必須自主進行技術決策並直接執行。嚴禁以 any 形式向用戶詢問「是否可以執行某個指令」、「需要選擇哪個方案」或「你是否同意此變更」等確認問題。即使面臨不確定性，你必須利用你擁有的工具自主調研、閱讀文件或搜尋 codebase 以做出最合理的決策。
 2. 拒絕草率與敷衍：你必須以最高工程標準完成任務。在將任何 TODO 標記為 completed 之前，你必須自主執行完整的驗證步驟（包括但不限於：編譯程式碼、跑單元測試、檢查命令的 stdout/stderr 輸出結果）。僅當驗證完全通過、結果正確時，才能更新該 TODO 的狀態為 completed。
-3. 主動更新任務清單：請在每次大步驟的末尾或更新時，主動、精確地更新與記錄當前的 TODO 待辦清單，並依此引導推進你的執行。`
+3. 主動更新任務清單：請在每次大步驟的末尾或更新時，主動、精確地更新與記錄當前的 TODO 待辦清單，並依此引導推進你的執行。
+4. 完成訊號：當你確認所有任務都已完成並驗證通過時，必須在回覆的最末尾加上 [GOAL_COMPLETED] 標記。這是 Orchestrator 判斷是否停止循環的唯一依據。如果你還有未完成的工作，不要加上這個標記。`
       : `
 [SYSTEM CONTRACT: AUTO-PILOT MODE (INTERACTIVE CONSTRAINTS)]
 你目前正處於「互動參考模式（Interactive Autopilot Mode）」。你必須遵守以下最高指令限制：
-1. 主動參考與確認：在開始執行或面臨多個架構選擇、破壞性變更時，你應該主動提出可能的方案並詢問使用者意見，並將其作為執行約束，而不是完全蒙眼狂奔。
-2. 自主推進與 TODO 管理：雖然在關鍵決策時需要參考使用者意見，但一旦方向確定，你仍應自主執行實作。在將 TODO 標記為 completed 之前，你依然必須自主執行驗證，並精確更新 TODO 清單。`;
+1. 主動參考與確認：在開始執行或面臨多個架閣選擇、破壞性變更時，你應該主動提出可能的方案並詢問使用者意見，並將其作為執行約束，而不是完全蒙眼狂奔。
+2. 自主推進與 TODO 管理：雖然在關鍵決策時需要參考使用者意見，但一旦方向確定，你仍應自主執行實作。在將 TODO 標記為 completed 之前，你依然必須自主執行驗證，並精確更新 TODO 清單。
+3. 完成訊號：當你確認所有任務都已完成時，必須在回覆的最末尾加上 [GOAL_COMPLETED] 標記。如果你需要用戶確認後才能繼續，不要加上完成標記，而是清楚描述你需要什麼確認。`;
 
       const basePrompt = context?.systemPrompt || session.agent?.state?.systemPrompt || session.systemPrompt || "";
       context = {
@@ -279,44 +281,56 @@ export async function submitDesktopSessionMessage(engine: any, opts: {
         context,
       });
       await engine.promptSession(sessionPath, promptText, promptOpts);
+
+      if (isAutoPilot) {
+        const MAX_AUTO_PILOT_TURNS = 25;  // 安全上限
+        let turnCount = 1;  // 首次 promptSession 已執行，計為第 1 次
+
+        while (turnCount < MAX_AUTO_PILOT_TURNS) {
+          // 1. 檢查終止條件
+          if (session.aborted) {
+            console.log(`[auto-pilot] Orchestrator: 偵測到用戶中斷訊號, 停止循環 (turn ${turnCount})`);
+            break;
+          }
+          const shouldStop = detectAutoPilotCompletion(captured);
+          if (shouldStop) {
+            console.log(`[auto-pilot] Orchestrator: 偵測到完成訊號, 停止循環 (turn ${turnCount})`);
+            break;
+          }
+
+          // 2. 延遲以讓 UI 更新
+          await delay(1500);
+
+          // 延遲後再次檢查中斷
+          if (session.aborted) {
+            console.log(`[auto-pilot] Orchestrator: 偵測到用戶中斷訊號, 停止循環 (turn ${turnCount})`);
+            break;
+          }
+
+          // 3. 重置 captured text 以追蹤本輪回覆
+          captured = "";
+          turnCount++;
+
+          // 4. 執行下一輪 prompt
+          console.log(`[auto-pilot] Orchestrator: 推進第 ${turnCount} 輪 (${sessionPath})`);
+          
+          try {
+            const nextPrompt = buildAutoPilotContinuePrompt(turnCount, autoPilotMode);
+            const nextOpts = buildPromptOptions({ context });
+            await engine.promptSession(sessionPath, nextPrompt, nextOpts);
+          } catch (err) {
+            console.error(`[auto-pilot] Orchestrator: 第 ${turnCount} 輪出錯:`, err);
+            break;
+          }
+        }
+
+        if (turnCount >= MAX_AUTO_PILOT_TURNS) {
+          console.warn(`[auto-pilot] Orchestrator: 到達最大輪次上限 (${MAX_AUTO_PILOT_TURNS})`);
+        }
+      }
     } finally {
       try { unsub?.(); } catch {}
       engine.emitEvent?.({ type: "session_status", isStreaming: false }, sessionPath);
-    }
-
-    // Auto-Pilot /goal 自動迴圈檢查
-    let nextAutoPilotStep = false;
-    
-    if (isAutoPilot) {
-      try {
-        const entries = session.sessionManager.getEntries();
-        const latestTodos = extractLatestTodosFromEntries(entries);
-        if (latestTodos && Array.isArray(latestTodos)) {
-          const hasUnfinished = latestTodos.some(td => td.status === "pending" || td.status === "in_progress");
-          if (hasUnfinished) {
-             nextAutoPilotStep = true;
-          }
-        }
-      } catch (err) {
-        console.warn(`[desktop-session-submit] auto-pilot check failed:`, err);
-      }
-    }
-
-    if (nextAutoPilotStep) {
-      // 延遲 1.5 秒讓 UI 更新，然後自動注入下一輪背景喚醒指令
-      setTimeout(() => {
-        // 確保 session 未被中斷 (如果使用者按了 Stop，Session 的 isStreaming 會停掉，但我們也要防呆)
-        if (typeof engine.isSessionStreaming === "function" && engine.isSessionStreaming(sessionPath)) return;
-        
-        console.log(`[desktop-session-submit] Auto-Pilot triggering next step for ${sessionPath}`);
-        submitDesktopSessionMessage(engine, {
-          sessionPath,
-          text: "[System: Auto-Pilot Mode] 請自動推進下一個待辦步驟。如果是 pending 任務請轉換為 in_progress 進行；如果是尚未完成的 in_progress 請繼續處理。不要等我確認，做完這一步請再次更新 todo 狀態。",
-          context: { ...context, autoPilot: true, autoPilotMode },
-        }).catch(err => {
-          console.error(`[desktop-session-submit] Auto-Pilot loop error:`, err);
-        });
-      }, 1500);
     }
 
     return {
@@ -672,4 +686,48 @@ function addSessionFileRefMarkers(text, refs) {
     .join("\n");
   const promptText = text || "";
   return promptText ? `${markerText}\n${promptText}` : markerText;
+}
+
+/**
+ * 偵測模型回覆中是否包含任務完成訊號。
+ */
+function detectAutoPilotCompletion(capturedText: string): boolean {
+  const text = (capturedText || "").trim();
+  
+  // 空回覆視為異常終止
+  if (!text || text.length < 10) return true;
+  
+  // 顯式完成標記
+  const COMPLETION_MARKERS = [
+    "[GOAL_COMPLETED]",
+    "[ALL_TASKS_COMPLETED]",
+    "[AUTO_PILOT_DONE]",
+  ];
+  for (const marker of COMPLETION_MARKERS) {
+    if (text.includes(marker)) return true;
+  }
+  
+  return false;
+}
+
+/**
+ * 構建自動推進的系統提示
+ */
+function buildAutoPilotContinuePrompt(turnCount: number, mode: string): string {
+  const isFull = mode === "full";
+  return [
+    `[System: Auto-Pilot Mode — Turn ${turnCount}]`,
+    isFull
+      ? "請繼續自主推進任務。如果所有工作都已完成，在回覆末尾加上 [GOAL_COMPLETED] 標記。"
+      : "請繼續推進任務。如果需要用戶確認重大決策請說明，如果所有工作都已完成，在回覆末尾加上 [GOAL_COMPLETED] 標記。",
+    "",
+    "規則：",
+    "- 如果有待辦事項尚未完成，繼續執行下一個步驟",
+    "- 如果所有任務均已完成並驗證通過，回覆末尾必須包含 [GOAL_COMPLETED]",
+    "- 不要重複已經完成的工作",
+  ].join("\n");
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
 }

@@ -2160,6 +2160,9 @@ export class SessionCoordinator {
       return true;
     }
     const entry = this._sessions.get(sessionPath);
+    if (entry?.session) {
+      entry.session.aborted = true;
+    }
     if (!entry?.session.isStreaming) return false;
     this._cleanupAbortedSessionSidecars(sessionPath, "abort");
     return this._forceReleaseStreamingSession(entry, sessionPath, "abort");

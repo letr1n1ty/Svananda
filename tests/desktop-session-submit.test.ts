@@ -947,4 +947,103 @@ describe("submitDesktopSessionMessage", () => {
     // origin 条目必须在 steer 成功后才写，被拒绝时不能产生孤儿
     expect(appendCustomEntry).not.toHaveBeenCalled();
   });
+
+  describe("Auto-Pilot (/goal) Orchestrator loop", () => {
+    it("loops until [GOAL_COMPLETED] is found in output", async () => {
+      const promptCalls: string[] = [];
+      const session = {
+        subscribe: (fn) => {
+          return () => {};
+        },
+        prompt: vi.fn(async (text, opts) => {
+          promptCalls.push(text);
+        }),
+        model: null,
+      };
+
+      let onDeltaCallback: any = null;
+      session.subscribe = (fn) => {
+        onDeltaCallback = fn;
+        return () => {};
+      };
+
+      session.prompt = vi.fn(async (text, opts) => {
+        promptCalls.push(text);
+        if (promptCalls.length === 1) {
+          onDeltaCallback?.({
+            type: "message_update",
+            assistantMessageEvent: { type: "text_delta", delta: "First turn result" }
+          });
+        } else {
+          onDeltaCallback?.({
+            type: "message_update",
+            assistantMessageEvent: { type: "text_delta", delta: "Done! [GOAL_COMPLETED]" }
+          });
+        }
+      });
+
+      const engine = {
+        ensureSessionLoaded: vi.fn(async () => session),
+        promptSession: vi.fn(async (sessionPath, text, opts) => session.prompt(text, opts)),
+        emitEvent: vi.fn(),
+        setUiContext: vi.fn(),
+      };
+
+      const result = await submitDesktopSessionMessage(engine, {
+        sessionPath: "/tmp/desk.jsonl",
+        text: "/goal test task",
+        displayMessage: { text: "/goal test task" },
+      });
+
+      expect(promptCalls).toHaveLength(2);
+      expect(promptCalls[0]).toBe("/goal test task");
+      expect(promptCalls[1]).toContain("[System: Auto-Pilot Mode — Turn 2]");
+      expect(result.text).toContain("[GOAL_COMPLETED]");
+    });
+
+    it("stops looping immediately if session.aborted is set to true during delay", async () => {
+      const promptCalls: string[] = [];
+      const session: any = {
+        subscribe: (fn) => {
+          return () => {};
+        },
+        prompt: vi.fn(async (text, opts) => {
+          promptCalls.push(text);
+        }),
+        model: null,
+      };
+
+      let onDeltaCallback: any = null;
+      session.subscribe = (fn) => {
+        onDeltaCallback = fn;
+        return () => {};
+      };
+
+      session.prompt = vi.fn(async (text, opts) => {
+        promptCalls.push(text);
+        onDeltaCallback?.({
+          type: "message_update",
+          assistantMessageEvent: { type: "text_delta", delta: "First turn result" }
+        });
+        session.aborted = true;
+      });
+
+      const engine = {
+        ensureSessionLoaded: vi.fn(async () => session),
+        promptSession: vi.fn(async (sessionPath, text, opts) => session.prompt(text, opts)),
+        emitEvent: vi.fn(),
+        setUiContext: vi.fn(),
+      };
+
+      const result = await submitDesktopSessionMessage(engine, {
+        sessionPath: "/tmp/desk.jsonl",
+        text: "/goal test task",
+        displayMessage: { text: "/goal test task" },
+      });
+
+      expect(promptCalls).toHaveLength(1);
+      expect(promptCalls[0]).toBe("/goal test task");
+      expect(result.text).toBe("First turn result");
+    });
+  });
 });
