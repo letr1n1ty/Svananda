@@ -1,11 +1,3 @@
-/**
- * commands.js — Slash 命令 REST API
- *
- * GET /api/commands?agentId=... — 返回 registry 前端镜像
- * 只暴露展示性字段（name / aliases / description / permission / scope / source），
- * 不含 handler 函数（前端不执行，handler 在 server dispatcher 里跑）。
- */
-
 import { Hono } from "hono";
 import { createModuleLogger } from "../../lib/debug-log.ts";
 import { OmniUltraworkRuntime } from "../../core/ultrawork/runtime.ts";
@@ -15,10 +7,12 @@ const log = createModuleLogger("commands");
 
 export function createCommandsRoute(engine) {
   const route = new Hono();
-  const ultraworkRuntime = new OmniUltraworkRuntime({ hanakoHome: engine.hanakoHome });
+  const ultraworkRuntime = new OmniUltraworkRuntime({
+    hanakoHome: engine.hanakoHome,
+    activityHub: engine.activityHub,
+  });
   route.route("", createUltraworkRoute(ultraworkRuntime));
 
-  /** GET /commands — 列出所有可见命令，供前端 slash 菜单显示 */
   route.get("/commands", (c) => {
     try {
       const registry = engine.slashRegistry;
