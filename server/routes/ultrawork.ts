@@ -7,9 +7,7 @@ const log = createModuleLogger("ultrawork");
 export function createUltraworkRoute(runtime) {
   const route = new Hono();
 
-  route.get("/ultrawork/capabilities", (c) => {
-    return c.json(runtime.capabilities());
-  });
+  route.get("/ultrawork/capabilities", (c) => c.json(runtime.capabilities()));
 
   route.get("/ultrawork/runs", (c) => {
     const limit = Number.parseInt(c.req.query("limit") || "20", 10);
@@ -38,25 +36,12 @@ export function createUltraworkRoute(runtime) {
     }
   });
 
-  route.post("/ultrawork/runs/:id/confirm", async (c) => {
-    return action(c, "confirm", (id, body) => runtime.confirmRun(id, body));
-  });
-
-  route.post("/ultrawork/runs/:id/continue", async (c) => {
-    return action(c, "continue", (id, body) => runtime.continueRun(id, body));
-  });
-
-  route.post("/ultrawork/runs/:id/cancel", async (c) => {
-    return action(c, "cancel", (id, body) => runtime.cancelRun(id, body));
-  });
-
-  route.post("/ultrawork/runs/:id/packets/next/run", async (c) => {
-    return action(c, "run-next-packet", (id, body) => runtime.runNextPacket(id, body));
-  });
-
-  route.post("/ultrawork/runs/:id/packets/:packetId/run", async (c) => {
-    return action(c, "run-packet", (id, body) => runtime.runPacket(id, c.req.param("packetId"), body));
-  });
+  route.post("/ultrawork/runs/:id/confirm", async (c) => action(c, "confirm", (id, body) => runtime.confirmRun(id, body)));
+  route.post("/ultrawork/runs/:id/continue", async (c) => action(c, "continue", (id, body) => runtime.continueRun(id, body)));
+  route.post("/ultrawork/runs/:id/cancel", async (c) => action(c, "cancel", (id, body) => runtime.cancelRun(id, body)));
+  route.post("/ultrawork/runs/:id/artifacts/sync", async (c) => action(c, "sync-artifacts", (id, body) => runtime.exportArtifacts(id, body)));
+  route.post("/ultrawork/runs/:id/packets/next/run", async (c) => action(c, "run-next-packet", (id, body) => runtime.runNextPacket(id, body)));
+  route.post("/ultrawork/runs/:id/packets/:packetId/run", async (c) => action(c, "run-packet", (id, body) => runtime.runPacket(id, c.req.param("packetId"), body)));
 
   async function action(c, name, fn) {
     try {
