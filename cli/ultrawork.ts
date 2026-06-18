@@ -93,6 +93,16 @@ function renderRun(run, { theme, connection, json }) {
   }
   console.log("");
 
+  if (Array.isArray(run.artifacts) && run.artifacts.length) {
+    console.log(`${ansi.bold}Artifacts${ansi.reset}`);
+    for (const artifact of run.artifacts) {
+      const model = artifact.model ? ` · ${artifact.model}` : "";
+      console.log(`  ${paint(theme, "◈")} ${artifact.title} ${ansi.dim}${artifact.kind} · ${artifact.agent} · ${artifact.source}${model}${ansi.reset}`);
+      console.log(indentPreview(artifact.content, "    "));
+    }
+    console.log("");
+  }
+
   console.log(`${ansi.bold}Permission profile${ansi.reset}`);
   for (const [key, value] of Object.entries(run.permissions)) {
     const rendered = Array.isArray(value) ? value.join(", ") : String(value);
@@ -119,9 +129,18 @@ function renderRunList(runs, theme) {
     return;
   }
   for (const run of runs) {
-    console.log(`${paint(theme, "•")} ${run.id} ${ansi.dim}${run.status} · ${run.mode} · ${run.intent}${ansi.reset}`);
+    const artifacts = Array.isArray(run.artifacts) ? ` · artifacts:${run.artifacts.length}` : "";
+    console.log(`${paint(theme, "•")} ${run.id} ${ansi.dim}${run.status} · ${run.mode} · ${run.intent}${artifacts}${ansi.reset}`);
     console.log(`  ${run.goal}`);
   }
+}
+
+function indentPreview(content, prefix) {
+  const text = String(content || "").trim();
+  if (!text) return `${prefix}${ansi.dim}(empty)${ansi.reset}`;
+  const lines = text.split(/\r?\n/).slice(0, 12);
+  const truncated = text.split(/\r?\n/).length > lines.length;
+  return lines.map((line) => `${prefix}${line}`).join("\n") + (truncated ? `\n${prefix}${ansi.dim}...${ansi.reset}` : "");
 }
 
 function markerForStatus(status) {
