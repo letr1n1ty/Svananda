@@ -11,6 +11,7 @@ export type UltraworkStatus = "queued" | "running" | "waiting_confirmation" | "c
 export type UltraworkAgentRole = "hana" | "planner" | "researcher" | "coder" | "operator" | "reviewer" | "archivist";
 export type UltraworkHookPhase = "before_plan" | "after_plan" | "before_tool" | "after_tool" | "before_mutation" | "after_review";
 export type UltraworkArtifactKind = "plan" | "review" | "note";
+export type UltraworkWorkPacketKind = "coding" | "product" | "research" | "personal_ops" | "review" | "archive";
 
 export type UltraworkAgentSpec = {
   id: UltraworkAgentRole;
@@ -27,6 +28,22 @@ export type UltraworkStep = {
   kind: "intent" | "plan" | "delegate" | "tool" | "review" | "deliver";
   risk: "low" | "medium" | "high";
   requiresConfirmation: boolean;
+  createdAt: string;
+  updatedAt: string;
+  notes?: string;
+};
+
+export type UltraworkWorkPacket = {
+  id: string;
+  title: string;
+  kind: UltraworkWorkPacketKind;
+  agent: UltraworkAgentRole;
+  status: UltraworkStatus;
+  objective: string;
+  inputs: string[];
+  deliverables: string[];
+  confirmationGates: string[];
+  source: "deterministic" | "planner" | "system";
   createdAt: string;
   updatedAt: string;
   notes?: string;
@@ -69,6 +86,7 @@ export type UltraworkRun = {
   sessionPath: string | null;
   agents: UltraworkAgentSpec[];
   steps: UltraworkStep[];
+  workPackets: UltraworkWorkPacket[];
   artifacts: UltraworkArtifact[];
   audit: UltraworkAuditEvent[];
   permissions: UltraworkPermissionProfile;
@@ -152,6 +170,7 @@ export class OmniUltraworkRuntime {
       actions: ["confirm", "continue", "cancel"],
       activityKinds: ["workflow", "workflow_agent", "workflow_step"],
       artifactKinds: ["plan", "review", "note"],
+      workPacketKinds: ["coding", "product", "research", "personal_ops", "review", "archive"],
       textGeneration: !!this.textGenerator,
       artifactExport: !!this.artifactExporter,
     };
@@ -185,6 +204,7 @@ export class OmniUltraworkRuntime {
       sessionPath: input.sessionPath || null,
       agents,
       steps: createInitialPlan({ goal, mode, intent, permissions }),
+      workPackets: [],
       artifacts: [],
       audit: [],
       permissions,
@@ -202,6 +222,7 @@ export class OmniUltraworkRuntime {
       stepCount: run.steps.length,
     });
 
+    this.generateWorkPackets(run);
     await this.generateInitialArtifacts(run);
     this.runs.set(run.id, run);
     this.publishActivity(run);
@@ -269,6 +290,12 @@ export class OmniUltraworkRuntime {
           step.updatedAt = now;
         }
       }
+      for (const packet of run.workPackets || []) {
+        if (packet.status !== "completed") {
+          packet.status = "cancelled";
+          packet.updatedAt = now;
+        }
+      }
       this.record(run, "run.cancelled", input.actor || "hana", "Cancelled Ultrawork run", {
         reason: input.reason || null,
       });
@@ -276,6 +303,15 @@ export class OmniUltraworkRuntime {
     this.publishActivity(run);
     this.save();
     return run;
+  }
+
+  private generateWorkPackets(run: UltraworkRun) {
+    const packets = createDeterministicWorkPackets(run);
+    run.workPackets.push(...packets);
+    this.record(run, "work_packets.generated", "planner", `Generated ${packets.length} delegated work packets`, {
+      packetIds: packets.map((packet) => packet.id),
+      packetKinds: packets.map((packet) => packet.kind),
+    });
   }
 
   private async generateInitialArtifacts(run: UltraworkRun) {
@@ -360,6 +396,17 @@ export class OmniUltraworkRuntime {
         actor,
       });
     }
+    for (const packet of run.workPackets || []) {
+      if (packet.status === "completed" || packet.status === "cancelled") continue;
+      packet.status = "completed";
+      packet.updatedAt = now;
+      packet.notes = appendNote(packet.notes, "Skeleton lifecycle marked this packet complete; real delegated execution is not wired yet.");
+      this.record(run, "work_packet.completed", packet.agent, `Completed work packet: ${packet.title}`, {
+        packetId: packet.id,
+        kind: packet.kind,
+        actor,
+      });
+    }
     run.status = "completed";
     this.record(run, "run.completed", "reviewer", "Completed skeleton Ultrawork run after lifecycle advancement", {
       caveat: "This is a skeleton completion. Tool execution, memory writes, file mutation, and PR creation are still gated future work.",
@@ -419,6 +466,24 @@ export class OmniUltraworkRuntime {
         finishedAt: isTerminalStatus(step.status) ? toMs(step.updatedAt) : null,
       });
     }
+    for (const [idx, packet] of (run.workPackets || []).entries()) {
+      this.activityHub.upsert({
+        id: `${parentTaskId}:packet:${packet.id}`,
+        kind: "workflow_step",
+        status: toActivityStatus(packet.status),
+        sessionPath: run.sessionPath,
+        agentId: packet.agent,
+        agentName: displayNameForAgent(packet.agent),
+        summary: packet.objective,
+        label: `Packet ${idx + 1}. ${packet.title}`,
+        access: packet.confirmationGates.length ? "confirm" : run.mode,
+        parentTaskId,
+        phaseLabel: packet.agent,
+        stepKind: "work_packet",
+        startedAt: toMs(packet.createdAt),
+        finishedAt: isTerminalStatus(packet.status) ? toMs(packet.updatedAt) : null,
+      });
+    }
   }
 
   private requireRun(id: string) {
@@ -452,6 +517,7 @@ export class OmniUltraworkRuntime {
       for (const run of runs) {
         if (run?.id) {
           if (!Array.isArray(run.artifacts)) run.artifacts = [];
+          if (!Array.isArray(run.workPackets)) run.workPackets = [];
           this.runs.set(run.id, run);
         }
       }
@@ -628,15 +694,106 @@ function createInitialPlan({
   }));
 }
 
+function createDeterministicWorkPackets(run: UltraworkRun): UltraworkWorkPacket[] {
+  const now = new Date().toISOString();
+  const packets: Array<Omit<UltraworkWorkPacket, "id" | "createdAt" | "updatedAt">> = [];
+  const hasAgent = (agent: UltraworkAgentRole) => run.agents.some((spec) => spec.id === agent);
+
+  if (hasAgent("researcher") && (run.intent === "research" || run.intent === "product" || run.intent === "mixed")) {
+    packets.push({
+      title: run.intent === "product" ? "Product discovery packet" : "Research evidence packet",
+      kind: run.intent === "product" ? "product" : "research",
+      agent: "researcher",
+      status: "queued",
+      objective: run.intent === "product"
+        ? "Clarify product requirements, UX implications, acceptance criteria, and open questions without mutating project state."
+        : "Collect and organize evidence, source requirements, uncertainty, and follow-up research questions without claiming external work was completed.",
+      inputs: ["goal", "intent", "permission profile", "Kannon plan artifact"],
+      deliverables: run.intent === "product"
+        ? ["requirements outline", "acceptance criteria", "edge cases", "open decisions"]
+        : ["source checklist", "evidence summary", "uncertainty log", "citation requirements"],
+      confirmationGates: gateSubset(run, ["external_send", "memory_write"]),
+      source: "deterministic",
+    });
+  }
+
+  if (hasAgent("coder") && (run.intent === "coding" || run.intent === "mixed")) {
+    packets.push({
+      title: "Coding implementation packet",
+      kind: "coding",
+      agent: "coder",
+      status: "queued",
+      objective: "Identify target files, proposed changes, verification commands, and rollback strategy before any file mutation or pull request.",
+      inputs: ["goal", "execution graph", "permission profile", "repo context when available"],
+      deliverables: ["file impact map", "implementation checklist", "test plan", "mutation candidates"],
+      confirmationGates: gateSubset(run, ["file_mutation", "pull_request", "destructive_action"]),
+      source: "deterministic",
+    });
+  }
+
+  if (hasAgent("operator") && (run.intent === "personal_ops" || run.intent === "mixed")) {
+    packets.push({
+      title: "Personal operations packet",
+      kind: "personal_ops",
+      agent: "operator",
+      status: "queued",
+      objective: "Prepare drafts, schedules, message candidates, and external action proposals while keeping side effects gated.",
+      inputs: ["goal", "session context", "permission profile", "available integrations"],
+      deliverables: ["draft actions", "integration checklist", "privacy review inputs", "confirmation requests"],
+      confirmationGates: gateSubset(run, ["external_send", "memory_write", "payment", "credential_access"]),
+      source: "deterministic",
+    });
+  }
+
+  packets.push({
+    title: "Risk review packet",
+    kind: "review",
+    agent: "reviewer",
+    status: "queued",
+    objective: "Review delegated outputs for correctness, privacy, permission-boundary violations, and irreversible effects before delivery.",
+    inputs: ["all work packets", "permission profile", "audit trail", "generated artifacts"],
+    deliverables: ["risk summary", "blocked actions", "safe-to-proceed recommendation", "confirmation checklist"],
+    confirmationGates: run.permissions.requiresConfirmationFor,
+    source: "deterministic",
+  });
+
+  packets.push({
+    title: "Archive and handoff packet",
+    kind: "archive",
+    agent: "archivist",
+    status: "queued",
+    objective: "Persist the audit trail, artifacts, packet state, and handoff summary for later resume or review.",
+    inputs: ["run record", "artifacts", "activity state", "session files when available"],
+    deliverables: ["audit log", "artifact references", "resume summary", "memory candidates if approved"],
+    confirmationGates: gateSubset(run, ["memory_write"]),
+    source: "deterministic",
+  });
+
+  return packets.map((packet) => ({
+    ...packet,
+    id: crypto.randomUUID(),
+    createdAt: now,
+    updatedAt: now,
+  }));
+}
+
 function deterministicPlanContent(run: UltraworkRun) {
   const agents = run.agents.map((agent) => `${agent.name} (${agent.id})`).join(", ");
   const steps = run.steps.map((step, index) => `${index + 1}. ${step.title} [${step.agent}/${step.kind}/risk:${step.risk}]`).join("\n");
-  return `# Ultrawork Plan\n\nGoal: ${run.goal}\nMode: ${run.mode}\nIntent: ${run.intent}\nAgents: ${agents}\n\n## Execution graph\n${steps}\n\n## Permission boundary\n${run.permissions.requiresConfirmationFor.join(", ") || "none"}\n`;
+  const packets = (run.workPackets || [])
+    .map((packet, index) => `${index + 1}. ${packet.title} [${packet.agent}/${packet.kind}] -> ${packet.deliverables.join(", ")}`)
+    .join("\n");
+  return `# Ultrawork Plan\n\nGoal: ${run.goal}\nMode: ${run.mode}\nIntent: ${run.intent}\nAgents: ${agents}\n\n## Execution graph\n${steps}\n\n## Delegated work packets\n${packets || "none"}\n\n## Permission boundary\n${run.permissions.requiresConfirmationFor.join(", ") || "none"}\n`;
 }
 
 function deterministicReviewContent(run: UltraworkRun) {
   const highRiskSteps = run.steps.filter((step) => step.risk === "high").map((step) => step.title);
-  return `# Ultrawork Review\n\nStatus: ${run.status}\nReviewer: Miroku\n\n## Risk summary\n- High-risk steps: ${highRiskSteps.length ? highRiskSteps.join("; ") : "none"}\n- External sends allowed: ${run.permissions.canSendExternalMessages}\n- Memory writes allowed: ${run.permissions.canWriteMemory}\n- File mutation allowed: ${run.permissions.canMutateFiles}\n\n## Gate recommendation\nProceed only within the ${run.mode} permission profile. Require explicit confirmation for: ${run.permissions.requiresConfirmationFor.join(", ") || "none"}.\n`;
+  const gatedPackets = (run.workPackets || []).filter((packet) => packet.confirmationGates.length > 0).map((packet) => packet.title);
+  return `# Ultrawork Review\n\nStatus: ${run.status}\nReviewer: Miroku\n\n## Risk summary\n- High-risk steps: ${highRiskSteps.length ? highRiskSteps.join("; ") : "none"}\n- Gated work packets: ${gatedPackets.length ? gatedPackets.join("; ") : "none"}\n- External sends allowed: ${run.permissions.canSendExternalMessages}\n- Memory writes allowed: ${run.permissions.canWriteMemory}\n- File mutation allowed: ${run.permissions.canMutateFiles}\n\n## Gate recommendation\nProceed only within the ${run.mode} permission profile. Require explicit confirmation for: ${run.permissions.requiresConfirmationFor.join(", ") || "none"}.\n`;
+}
+
+function gateSubset(run: UltraworkRun, gates: string[]) {
+  return gates.filter((gate) => run.permissions.requiresConfirmationFor.includes(gate));
 }
 
 function markWaitingSteps(run: UltraworkRun, nextStatus: UltraworkStatus) {
