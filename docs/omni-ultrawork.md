@@ -1,6 +1,6 @@
 # Omni Ultrawork MVP
 
-Omni Ultrawork is the Svananda counterpart to an agent-harness `ultrawork` mode: one user goal enters the system, then Hana routes intent, selects specialist agents, applies a permission profile, creates a resumable execution graph, generates delegated work packets, runs packets through a packet runner registry, generates plan/review/runner artifacts, exports artifacts to session files when a session exists, broadcasts activity, and persists an audit trail.
+Omni Ultrawork is the Svananda counterpart to an agent-harness `ultrawork` mode: one user goal enters the system, then Hana routes intent, selects specialist agents, applies a permission profile, creates a resumable execution graph, generates delegated work packets, runs packets through a packet runner registry, generates plan/review/runner artifacts, exports artifacts to session files when a session exists, broadcasts activity, persists an audit trail, and exposes a read-only Desktop panel for capabilities and recent runs.
 
 ## CLI
 
@@ -135,6 +135,17 @@ Status mapping:
 | `failed` | `failed` |
 | `cancelled` | `aborted` |
 
+## Desktop panel
+
+The Desktop surface is intentionally read-only in this MVP. The sidebar exposes an `Ultrawork` entry that opens a floating panel next to Activity, Automation, and Bridge.
+
+The panel reads:
+
+- `GET /api/ultrawork/capabilities`
+- `GET /api/ultrawork/runs?limit=12`
+
+It displays runtime capability counts, packet runner counts, artifact/text-generation flags, recent run status, mode, intent, packet completion ratio, and exported artifact ratio. It does not start runs, execute packets, sync artifacts, or perform any external effect.
+
 ## Agent roster
 
 | Agent | Role | Mission |
@@ -149,7 +160,7 @@ Status mapping:
 
 ## Current scope
 
-This PR establishes the transport, data model, permission profile, deterministic intent routing, agent selection, execution graph, delegated work packets, packet runner registry, generated plan/review/runner artifacts, exported artifact session files, manual artifact sync, persistent audit log, explicit run lifecycle actions, and ActivityHub publication. It intentionally does not yet wire real tool execution, memory writes, PR creation, or background continuation.
+This PR establishes the transport, data model, permission profile, deterministic intent routing, agent selection, execution graph, delegated work packets, packet runner registry, generated plan/review/runner artifacts, exported artifact session files, manual artifact sync, persistent audit log, explicit run lifecycle actions, ActivityHub publication, and a read-only Desktop panel. It intentionally does not yet wire real tool execution, memory writes, PR creation, UI mutation controls, or background continuation.
 
 The audit store is persisted at:
 
@@ -167,12 +178,13 @@ $HANA_HOME/workflow-activity.json
 
 - The runtime file was formatted after an earlier compressed implementation pass; the large runtime diff is not intended to introduce a separate feature boundary.
 - Server routes normalize unknown thrown values before logging or returning errors.
+- The Desktop panel is read-only and deliberately avoids start/run/sync buttons in this MVP.
 - No local test or typecheck command has been run as part of this connector-only implementation pass.
 
 ## Next PRs
 
-1. Add a Desktop Ultrawork panel/card backed by the existing `agent_activity` stream, work packets, and exported session files.
-2. Bind work packets to real tool runners for coding, research, product, and personal ops.
-3. Add permission-gated file mutation and PR creation.
-4. Add background continuation with explicit scheduler bounds.
-5. Add artifact regeneration actions.
+1. Bind work packets to real tool runners for coding, research, product, and personal ops.
+2. Add permission-gated file mutation and PR creation.
+3. Add background continuation with explicit scheduler bounds.
+4. Add artifact regeneration actions.
+5. Add safe UI controls for packet execution and artifact sync.
