@@ -3,7 +3,6 @@ import { usePanel } from '../hooks/use-panel';
 import { hanaFetch } from '../hooks/use-hana-fetch';
 import { formatSessionDate } from '../utils/format';
 import fp from './FloatingPanels.module.css';
-import automationStyles from './automation/AutomationPanel.module.css';
 
 interface UltraworkRunSummary {
   id: string;
@@ -29,7 +28,16 @@ interface UltraworkCapabilities {
 
 const PANEL_STYLE: React.CSSProperties = { display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 };
 const STACK_STYLE: React.CSSProperties = { display: 'flex', flexDirection: 'column', gap: 'var(--space-sm)' };
-const META_STYLE: React.CSSProperties = { display: 'flex', flexWrap: 'wrap', gap: '6px', marginTop: 6 };
+const CARD_STYLE: React.CSSProperties = {
+  border: '1px solid var(--overlay-light)',
+  borderRadius: 'var(--radius-md)',
+  background: 'var(--bg-card, var(--bg))',
+  padding: 'var(--space-md)',
+};
+const CARD_HEADER_STYLE: React.CSSProperties = { display: 'flex', justifyContent: 'space-between', gap: 'var(--space-sm)', alignItems: 'flex-start' };
+const TITLE_STYLE: React.CSSProperties = { fontSize: '0.82rem', fontWeight: 600, color: 'var(--text)', lineHeight: 1.35 };
+const META_TEXT_STYLE: React.CSSProperties = { fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: 3 };
+const META_STYLE: React.CSSProperties = { display: 'flex', flexWrap: 'wrap', gap: '6px', marginTop: 9 };
 const PILL_STYLE: React.CSSProperties = {
   fontSize: '0.68rem',
   color: 'var(--text-muted)',
@@ -37,6 +45,13 @@ const PILL_STYLE: React.CSSProperties = {
   borderRadius: 999,
   padding: '2px 7px',
 };
+const BADGE_STYLE: React.CSSProperties = {
+  ...PILL_STYLE,
+  color: 'var(--text)',
+  background: 'rgba(var(--accent-rgb), 0.055)',
+  borderColor: 'rgba(var(--accent-rgb), 0.18)',
+};
+const DESCRIPTION_STYLE: React.CSSProperties = { ...META_TEXT_STYLE, marginTop: 9, lineHeight: 1.5 };
 
 export function UltraworkPanel() {
   const [runs, setRuns] = useState<UltraworkRunSummary[]>([]);
@@ -83,7 +98,7 @@ export function UltraworkPanel() {
             <div style={STACK_STYLE}>
               <CapabilityCard capabilities={capabilities} loading={loading} error={error} />
               {runs.length === 0 ? (
-                <div className={fp.activityEmpty}>{loading ? 'Loading Ultrawork runs…' : 'No Ultrawork runs yet.'}</div>
+                <div className={fp.activityEmpty}>{loading ? 'Loading Ultrawork runs...' : 'No Ultrawork runs yet.'}</div>
               ) : runs.map(run => <RunCard key={run.id} run={run} />)}
             </div>
           </div>
@@ -97,12 +112,12 @@ function CapabilityCard({ capabilities, loading, error }: { capabilities: Ultraw
   const actions = capabilities?.actions || [];
   const runners = capabilities?.packetRunners || [];
   return (
-    <div className={automationStyles.groupCard}>
-      <div className={automationStyles.groupHeader}>
+    <div style={CARD_STYLE}>
+      <div style={CARD_HEADER_STYLE}>
         <div>
-          <div className={automationStyles.groupTitle}>Runtime capabilities</div>
-          <div className={automationStyles.groupMeta}>
-            {loading ? 'Refreshing…' : error ? `Unavailable: ${error}` : 'Live API snapshot'}
+          <div style={TITLE_STYLE}>Runtime capabilities</div>
+          <div style={META_TEXT_STYLE}>
+            {loading ? 'Refreshing...' : error ? `Unavailable: ${error}` : 'Live API snapshot'}
           </div>
         </div>
       </div>
@@ -112,7 +127,7 @@ function CapabilityCard({ capabilities, loading, error }: { capabilities: Ultraw
         <span style={PILL_STYLE}>artifact export {capabilities?.artifactExport ? 'on' : 'off'}</span>
         <span style={PILL_STYLE}>text gen {capabilities?.textGeneration ? 'on' : 'off'}</span>
       </div>
-      {actions.length > 0 && <div className={automationStyles.groupDescription}>{actions.join(' · ')}</div>}
+      {actions.length > 0 && <div style={DESCRIPTION_STYLE}>{actions.join(' · ')}</div>}
     </div>
   );
 }
@@ -125,13 +140,13 @@ function RunCard({ run }: { run: UltraworkRunSummary }) {
   const updated = run.updatedAt ? formatSessionDate(run.updatedAt) : '';
 
   return (
-    <div className={automationStyles.groupCard}>
-      <div className={automationStyles.groupHeader}>
+    <div style={CARD_STYLE}>
+      <div style={CARD_HEADER_STYLE}>
         <div>
-          <div className={automationStyles.groupTitle}>{run.goal || run.id}</div>
-          <div className={automationStyles.groupMeta}>{updated || run.id}</div>
+          <div style={TITLE_STYLE}>{run.goal || run.id}</div>
+          <div style={META_TEXT_STYLE}>{updated || run.id}</div>
         </div>
-        <span className={automationStyles.groupBadge}>{run.status}</span>
+        <span style={BADGE_STYLE}>{run.status}</span>
       </div>
       <div style={META_STYLE}>
         <span style={PILL_STYLE}>{run.mode}</span>
@@ -140,7 +155,7 @@ function RunCard({ run }: { run: UltraworkRunSummary }) {
         <span style={PILL_STYLE}>artifacts {exported}/{artifacts.length} exported</span>
       </div>
       {packets.length > 0 && (
-        <div className={automationStyles.groupDescription}>
+        <div style={DESCRIPTION_STYLE}>
           {packets.slice(0, 4).map(packet => `${packet.kind}:${packet.status}`).join(' · ')}
           {packets.length > 4 ? ` · +${packets.length - 4}` : ''}
         </div>
