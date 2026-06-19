@@ -1,0 +1,83 @@
+/**
+ * shadcn.css — Hana Token Bridge
+ *
+ * 這個檔案是 shadcn/Tailwind 語義 token 與 HanaAgent 既有 design token 的橋接層。
+ * 職責：讓 shadcn 生成的元件自動吃 Hana 的 CSS 變數。
+ *
+ * 原則：
+ * - 不加 aggressive base reset（styles.css 已有全域 reset）
+ * - 不覆蓋 body font、scrollbar、selection 等全域樣式
+ * - 只做 token 映射 + 最小限度 button cursor 修正
+ */
+
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  /* ── Background / Foreground ── */
+  --color-background: var(--bg);
+  --color-foreground: var(--text);
+
+  /* ── Card ── */
+  --color-card: var(--bg-card, var(--bg));
+  --color-card-foreground: var(--text);
+
+  /* ── Popover ── */
+  --color-popover: var(--bg-card, var(--bg));
+  --color-popover-foreground: var(--text);
+
+  /* ── Primary（accent） ── */
+  --color-primary: var(--accent);
+  --color-primary-foreground: var(--accent-contrast, #ffffff);
+
+  /* ── Secondary（muted surface） ── */
+  --color-secondary: var(--bg-muted, var(--bg-card, var(--bg)));
+  --color-secondary-foreground: var(--text);
+
+  /* ── Muted ── */
+  --color-muted: var(--bg-muted, var(--bg-card, var(--bg)));
+  --color-muted-foreground: var(--text-muted, var(--muted, var(--text)));
+
+  /* ── Accent（hover surface） ── */
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-contrast, #ffffff);
+
+  /* ── Destructive ── */
+  --color-destructive: var(--danger, #dc2626);
+  --color-destructive-foreground: #ffffff;
+
+  /* ── Border / Input / Ring ── */
+  --color-border: var(--border, rgba(0, 0, 0, 0.12));
+  --color-input: var(--border, rgba(0, 0, 0, 0.12));
+  --color-ring: var(--accent);
+
+  /* ── Sidebar（Shadcn sidebar tokens，橋接至 Hana） ── */
+  --color-sidebar: var(--bg-sidebar, var(--bg));
+  --color-sidebar-foreground: var(--text);
+  --color-sidebar-primary: var(--accent);
+  --color-sidebar-primary-foreground: var(--accent-contrast, #ffffff);
+  --color-sidebar-accent: var(--accent);
+  --color-sidebar-accent-foreground: var(--accent-contrast, #ffffff);
+  --color-sidebar-border: var(--border, rgba(0, 0, 0, 0.12));
+  --color-sidebar-ring: var(--accent);
+
+  /* ── Radius ── */
+  --radius-sm: var(--radius-sm, 4px);
+  --radius-md: var(--radius-md, 6px);
+  --radius-lg: var(--radius-lg, 8px);
+  --radius-xl: var(--radius-xl, 12px);
+
+  /* ── Typography ── */
+  --font-sans: var(--font-ui, ui-sans-serif, system-ui, sans-serif);
+  --font-mono: var(--font-mono, ui-monospace, monospace);
+}
+
+@layer base {
+  /* 互動元素 cursor — 僅補充 shadcn 元件預設缺少的 pointer */
+  button:not(:disabled),
+  [role="button"]:not(:disabled) {
+    cursor: pointer;
+  }
+}

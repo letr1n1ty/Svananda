@@ -1,5 +1,6 @@
 import { defineConfig, type Plugin, type ProxyOptions } from 'vite';
 import react from '@vitejs/plugin-react';
+import tailwindcss from '@tailwindcss/vite';
 import path from 'path';
 import fs from 'fs';
 import crypto from 'crypto';
@@ -300,6 +301,7 @@ export default defineConfig({
   plugins: [
     preserveLegacyCss(),
     react(),
+    tailwindcss(),
     injectCsp(),
     injectDevWebConfig(),
     serveMobilePwaStaticFiles(),

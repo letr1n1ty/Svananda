@@ -1,3 +1,6 @@
+// shadcn token bridge — 必須在 App 之前載入，讓 Tailwind 語義 token 映射至 Hana CSS var
+import './react/styles/shadcn.css';
+
 import { createRoot } from 'react-dom/client';
 import App from './react/App';
 

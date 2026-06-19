@@ -6,6 +6,8 @@
 
 import type { DesktopNotificationOptions, PlatformApi } from './react/types';
 
+
+
 declare global {
   interface Window {
     // ── i18n ──

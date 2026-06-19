@@ -32,6 +32,8 @@ import { openSettingsModal } from './stores/settings-modal-actions';
 import { AppTitlebar } from './components/app/AppTitlebar';
 import { ChatSidebar } from './components/app/ChatSidebar';
 import { AppPages } from './components/app/AppPages';
+import { HanaTooltipProvider } from './components/hana';
+import { ShadcnPrimitivePreview } from './components/dev/ShadcnPrimitivePreview';
 
 declare function t(key: string, vars?: Record<string, string | number>): string;
 
@@ -85,6 +87,7 @@ function App() {
   }, []);
 
   return (
+    <HanaTooltipProvider>
     <ErrorBoundary>
       {/* Headless behavior components */}
       <SidebarLayout />
@@ -157,7 +160,13 @@ function App() {
 
       {/* Toast notifications */}
       <ToastContainer />
+
+      {/* Dev-only: shadcn token bridge preview
+          啟用：localStorage.setItem('hana.dev.shadcnPreview', '1'); location.reload();
+          關閉：localStorage.removeItem('hana.dev.shadcnPreview'); location.reload(); */}
+      {!import.meta.env.PROD && <ShadcnPrimitivePreview />}
     </ErrorBoundary>
+    </HanaTooltipProvider>
   );
 }
 
