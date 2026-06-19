@@ -1,9 +1,16 @@
 import { useEffect, useRef } from 'react';
 import { useStore } from '../stores';
 import type { Toast } from '../stores/toast-slice';
+import { HanaToaster } from './hana';
+import { isUiMigrationEnabled } from '../flags/uiFlags';
 
 export function ToastContainer() {
   const toasts = useStore((s) => s.toasts);
+
+  if (isUiMigrationEnabled('toast')) {
+    return <HanaToaster />;
+  }
+
   return (
     <div className="toast-container">
       {toasts.map((t) => (
