@@ -38,6 +38,33 @@ vi.mock('../../widgets/Toggle', () => ({
   ),
 }));
 
+vi.mock('../../../components/hana', () => ({
+  HanaSwitch: ({
+    on,
+    onChange,
+    label,
+    ariaLabel,
+  }: {
+    on: boolean | 'mixed' | undefined;
+    onChange: (next: boolean) => void;
+    label?: string;
+    ariaLabel?: string;
+  }) => (
+    <button
+      type="button"
+      aria-label={ariaLabel || label}
+      aria-busy={on === undefined || on === 'mixed' ? 'true' : undefined}
+      aria-checked={on === undefined || on === 'mixed' ? 'mixed' : on ? 'true' : 'false'}
+      disabled={on === undefined || on === 'mixed'}
+      onClick={() => {
+        if (on !== undefined && on !== 'mixed') onChange(!on);
+      }}
+    >
+      switch
+    </button>
+  ),
+}));
+
 const autoSaveConfig = vi.fn();
 const loadSettingsConfig = vi.fn();
 
