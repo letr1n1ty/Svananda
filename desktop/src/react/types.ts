@@ -219,6 +219,7 @@ export interface PreviewItem {
   sourceRootPath?: string;
   status?: 'available' | 'expired' | string;
   missingAt?: number | null;
+  fileVersion?: FileVersion | null;
   remoteContentRef?: RemoteContentRef | null;
 }
 

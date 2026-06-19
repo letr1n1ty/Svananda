@@ -75,7 +75,7 @@ function createUltraworkTextGenerator(engine) {
   return async ({ kind, run }) => {
     const agentId = run.sessionPath ? engine.agentIdFromSessionPath?.(run.sessionPath) || null : engine.currentAgentId || null;
     const utility = engine.resolveUtilityConfig({ agentId, sessionPath: run.sessionPath || null });
-    const text = await callText({
+    const res = await callText({
       api: utility.api,
       apiKey: utility.api_key,
       baseUrl: utility.base_url,
@@ -102,7 +102,8 @@ function createUltraworkTextGenerator(engine) {
           : { kind: "utility", agentId: utility.usageAgentId || agentId || null },
       },
     } as any);
-    return { text, model: modelLabel(utility.utility) };
+    const textStr = typeof res === "string" ? res : (res?.text || "");
+    return { text: textStr, model: modelLabel(utility.utility) };
   };
 }
 
