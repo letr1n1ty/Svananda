@@ -466,7 +466,7 @@
     "types": {
       "hanako": {
         "label": "バランス型アシスタント",
-        "avatar": "Svanandako.png"
+        "avatar": "Hanako.png"
       },
       "butter": {
         "label": "より感情豊か",
@@ -2026,7 +2026,7 @@
       "userLabel": "なんとお呼びすればいいですか？",
       "placeholder": "あなたの名前",
       "agentLabel": "この Agent の名前は？",
-      "agentPlaceholder": "Svanandako",
+      "agentPlaceholder": "Hanako",
       "memoryTitle": "メモリシステム",
       "memoryHint": "オンにすると、システムは会話終了時に内容を整理してメモリにします。メモリはよく更新されるため、モデルのキャッシュヒット率が下がることがあります。オフにすると通常はより安くなります。",
       "back": "戻る",
