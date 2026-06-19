@@ -1,10 +1,10 @@
 /**
  * uiFlags.ts — UI 遷移 Feature Flag 工具
  *
- * 統一透過 localStorage 控制各區域遷移開關，預設啟用新元件（新版）。
+ * 統一透過 localStorage 控制各區域遷移開關，預設關閉新元件（舊版）。
  *
- * 切回舊版（還原）：localStorage.setItem('hana.ui.<key>', '0'); location.reload();
- * 啟用新版（預設）：localStorage.removeItem('hana.ui.<key>'); location.reload();
+ * 啟用新版：localStorage.setItem('hana.ui.<key>', '1'); location.reload();
+ * 關閉新版（預設）：localStorage.removeItem('hana.ui.<key>'); location.reload();
  *
  * Flag 命名規則：
  *   hana.dev.shadcnPreview       — dev primitive preview overlay
@@ -20,28 +20,26 @@
 const UI_FLAG_PREFIX = 'hana.ui.';
 
 /**
- * 查詢 UI 遷移 flag 是否啟用。預設為啟用 (true)，除非明確設定為 '0' 才會停用並切回舊版。
+ * 查詢 UI 遷移 flag 是否啟用。預設為關閉 (false)。
  * @param key - flag 後綴，例如 'settings.dialog'、'toast'
  */
 export function isUiMigrationEnabled(key: string): boolean {
-  if (typeof window === 'undefined') return true;
-  return window.localStorage.getItem(`${UI_FLAG_PREFIX}${key}`) !== '0';
+  if (typeof window === 'undefined') return false;
+  return window.localStorage.getItem(`${UI_FLAG_PREFIX}${key}`) === '1';
 }
 
 /**
  * 設定 UI 遷移 flag。
  * @param key - flag 後綴
- * @param enabled - true 啟用新元件（恢復預設），false 停用並切回舊版
+ * @param enabled - true 啟用新元件，false 關閉新元件（恢復預設舊版）
  */
 export function setUiMigrationEnabled(key: string, enabled: boolean): void {
   if (typeof window === 'undefined') return;
   const fullKey = `${UI_FLAG_PREFIX}${key}`;
   if (enabled) {
-    // 啟用新元件：移除 '0' 標記
-    window.localStorage.removeItem(fullKey);
+    window.localStorage.setItem(fullKey, '1');
   } else {
-    // 停用新元件：寫入 '0' 以便切回舊版
-    window.localStorage.setItem(fullKey, '0');
+    window.localStorage.removeItem(fullKey);
   }
 }
 
