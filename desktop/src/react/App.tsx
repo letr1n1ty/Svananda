@@ -26,6 +26,8 @@ import { LeavesOverlay } from './components/LeavesOverlay';
 import { SelectionQuoteActionSurface } from './components/selection/SelectionQuoteActionSurface';
 import { MediaViewer } from './components/shared/MediaViewer/MediaViewer';
 import { SettingsModalShell } from './components/SettingsModalShell';
+import { SettingsModalShellV2 } from './components/SettingsModalShellV2';
+import { isUiMigrationEnabled } from './flags/uiFlags';
 import { initTheme, initDragPrevention } from './bootstrap';
 import { initApp } from './app-init';
 import { openSettingsModal } from './stores/settings-modal-actions';
@@ -150,7 +152,11 @@ function App() {
       <MediaViewer />
 
       {/* In-window settings overlay */}
-      <SettingsModalShell />
+      {isUiMigrationEnabled('settings.dialog') ? (
+        <SettingsModalShellV2 />
+      ) : (
+        <SettingsModalShell />
+      )}
 
       {/* Input context menu (cut/copy/paste) */}
       <InputContextMenu />
