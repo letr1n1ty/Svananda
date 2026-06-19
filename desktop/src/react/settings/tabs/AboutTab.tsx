@@ -9,8 +9,11 @@ import { SettingsRow } from '../components/SettingsRow';
 import { ExpandableRow } from '../components/ExpandableRow';
 import { AutoUpdateStatus } from '../../components/AutoUpdateStatus';
 import { useAutoUpdateState } from '../../hooks/use-auto-update-state';
+import { HanaSwitch } from '../../components/hana';
+import { isUiMigrationEnabled } from '../../flags/uiFlags';
 import appIconUrl from '../../../icon.png';
 import styles from '../Settings.module.css';
+
 
 export function AboutTab() {
   const hana = window.hana;
@@ -66,7 +69,9 @@ export function AboutTab() {
         )}
       </div>
 
-      {/* Info：4 个标准 row（license / copyright / github / beta toggle） */}
+      {/* Info：4 个标准 row（license / copyright / github / toggle）
+          flag hana.ui.settings.about — off: 舊 Toggle，on: HanaSwitch
+          啟用：localStorage.setItem('hana.ui.settings.about', '1'); location.reload(); */}
       <SettingsSection>
         <SettingsRow
           label={t('settings.about.license')}
@@ -96,14 +101,31 @@ export function AboutTab() {
             </a>
           }
         />
-        <SettingsRow
-          label={t('settings.about.autoCheckUpdates')}
-          control={<Toggle on={autoCheck} onChange={handleAutoCheckToggle} />}
-        />
-        <SettingsRow
-          label={t('settings.about.betaUpdates')}
-          control={<Toggle on={isBeta} onChange={handleBetaToggle} />}
-        />
+        {/* Toggle 雙軌：flag off = 舊 Toggle，flag on = HanaSwitch（Radix Switch primitive）
+            啟用：localStorage.setItem('hana.ui.settings.about', '1'); location.reload() */}
+        {isUiMigrationEnabled('settings.about') ? (
+          <>
+            <SettingsRow
+              label={t('settings.about.autoCheckUpdates')}
+              control={<HanaSwitch on={autoCheck} onChange={handleAutoCheckToggle} />}
+            />
+            <SettingsRow
+              label={t('settings.about.betaUpdates')}
+              control={<HanaSwitch on={isBeta} onChange={handleBetaToggle} />}
+            />
+          </>
+        ) : (
+          <>
+            <SettingsRow
+              label={t('settings.about.autoCheckUpdates')}
+              control={<Toggle on={autoCheck} onChange={handleAutoCheckToggle} />}
+            />
+            <SettingsRow
+              label={t('settings.about.betaUpdates')}
+              control={<Toggle on={isBeta} onChange={handleBetaToggle} />}
+            />
+          </>
+        )}
       </SettingsSection>
 
       {/* License 全文：ExpandableRow 直接作为 tab 末尾元素 */}

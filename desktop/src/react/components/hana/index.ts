@@ -17,6 +17,7 @@ export { HanaIconButton } from './HanaIconButton';
 // Form 系列
 export { HanaInput } from './HanaInput';
 export { HanaTextarea } from './HanaTextarea';
+export { HanaSwitch } from './HanaSwitch';
 
 // Layout / Display 系列
 export {
