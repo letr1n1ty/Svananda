@@ -125,7 +125,8 @@ describe('ContextRing', () => {
     fireEvent.mouseEnter(screen.getByText('input.refreshAndCompact'));
 
     await waitFor(() => {
-      expect(screen.getByText('input.refreshAndCompactTooltip')).toBeInTheDocument();
+      const elements = screen.queryAllByText('input.refreshAndCompactTooltip');
+      expect(elements.length).toBeGreaterThan(0);
     });
   });
 

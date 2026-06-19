@@ -57,32 +57,38 @@ export function SettingsModalShellV2() {
   if (!mounted) return null;
 
   return (
-    <DialogPrimitive.Root open={stage !== 'exit'} onOpenChange={(open) => { if (!open) requestClose(); }}>
+    <DialogPrimitive.Root open={mounted} onOpenChange={(open) => { if (!open) requestClose(); }}>
       <DialogPrimitive.Portal>
         <DialogPrimitive.Overlay
           className={`${styles.overlay} ${styles[visualState]}`}
           data-state={visualState}
         />
-        <DialogPrimitive.Content
-          ref={cardRef}
-          className={`${styles.card} ${styles[visualState]}`}
-          data-wide={isWideSettingsPage ? 'true' : undefined}
-          data-state={visualState}
-          aria-label={t('settings.title')}
-          onOpenAutoFocus={(event) => {
-            const target = cardRef.current?.querySelector<HTMLElement>('[data-settings-return]');
-            if (target) {
-              event.preventDefault();
-              target.focus();
-            }
-          }}
+        <div
+          className={`${styles.overlay} ${styles[visualState]}`}
+          style={{ background: 'none', backdropFilter: 'none', WebkitBackdropFilter: 'none', pointerEvents: 'none', zIndex: 1801 }}
         >
-          <SettingsContent
-            variant="modal"
-            onClose={requestClose}
-            onActiveTabChange={handleActiveTabChange}
-          />
-        </DialogPrimitive.Content>
+          <DialogPrimitive.Content
+            ref={cardRef}
+            className={`${styles.card} ${styles[visualState]}`}
+            style={{ pointerEvents: 'auto' }}
+            data-wide={isWideSettingsPage ? 'true' : undefined}
+            data-state={visualState}
+            aria-label={t('settings.title')}
+            onOpenAutoFocus={(event) => {
+              const target = cardRef.current?.querySelector<HTMLElement>('[data-settings-return]');
+              if (target) {
+                event.preventDefault();
+                target.focus();
+              }
+            }}
+          >
+            <SettingsContent
+              variant="modal"
+              onClose={requestClose}
+              onActiveTabChange={handleActiveTabChange}
+            />
+          </DialogPrimitive.Content>
+        </div>
       </DialogPrimitive.Portal>
     </DialogPrimitive.Root>
   );

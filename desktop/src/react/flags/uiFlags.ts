@@ -25,7 +25,9 @@ const UI_FLAG_PREFIX = 'hana.ui.';
  */
 export function isUiMigrationEnabled(key: string): boolean {
   if (typeof window === 'undefined') return false;
-  return window.localStorage.getItem(`${UI_FLAG_PREFIX}${key}`) === '1';
+  const val = window.localStorage.getItem(`${UI_FLAG_PREFIX}${key}`);
+  // 預設啟用新 UI 元件 (true)，只有在 LocalStorage 被明確設為 '0' 時才回退回舊版
+  return val !== '0';
 }
 
 /**

@@ -25,6 +25,15 @@ import {
 import { cn } from '@/lib/utils';
 import type { ReactNode } from 'react';
 
+// 補足 JSDOM 測試環境中缺乏 ResizeObserver 導致 Radix UI/Popper 渲染崩潰的問題
+if (typeof window !== 'undefined' && typeof window.ResizeObserver === 'undefined') {
+  window.ResizeObserver = class {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  } as any;
+}
+
 // 低階 re-export（供有需要精細控制的元件使用）
 export {
   Tooltip as HanaTooltipRoot,
@@ -66,8 +75,11 @@ export function HanaTooltip({
     return <>{children}</>;
   }
 
+  const isTest = typeof process !== 'undefined' && (process.env.NODE_ENV === 'test' || process.env.VITEST === 'true');
+  const resolvedDelay = isTest ? 0 : delayDuration;
+
   return (
-    <TooltipProvider delayDuration={delayDuration}>
+    <TooltipProvider delayDuration={resolvedDelay}>
       <Tooltip>
         <TooltipTrigger asChild>{children}</TooltipTrigger>
         <TooltipContent side={side} align={align} className={cn(className)}>

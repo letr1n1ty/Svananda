@@ -23,8 +23,8 @@ export type TooltipVariant = 'compact' | 'panel';
 export interface TooltipTriggerProps {
   ref: (node: HTMLElement | null) => void;
   'aria-describedby'?: string;
-  onMouseEnter: () => void;
-  onMouseLeave: () => void;
+  onMouseEnter: (event?: any) => void;
+  onMouseLeave: (event?: any) => void;
   onFocus: () => void;
   onBlur: () => void;
 }
@@ -96,6 +96,50 @@ function alignedCrossAxis(
   return anchorStart + (anchorSize - panelSize) / 2;
 }
 
+interface FunctionTriggerProps {
+  render: (props: TooltipTriggerProps) => ReactNode;
+}
+
+const FunctionTrigger = React.forwardRef<HTMLElement, FunctionTriggerProps>(
+  ({ render, ...props }, ref) => {
+    const onPointerMove = (props as any).onPointerMove;
+    const onPointerLeave = (props as any).onPointerLeave;
+    const onPointerDown = (props as any).onPointerDown;
+    const onFocus = (props as any).onFocus;
+    const onBlur = (props as any).onBlur;
+    const ariaDescribedby = (props as any)['aria-describedby'];
+
+    const triggerProps = useMemo<TooltipTriggerProps>(() => {
+      return {
+        ref: (node: HTMLElement | null) => {
+          if (typeof ref === 'function') {
+            ref(node);
+          } else if (ref && typeof ref === 'object') {
+            (ref as any).current = node;
+          }
+        },
+        onMouseEnter: (e: any) => {
+          onPointerMove?.(e);
+          onPointerDown?.(e);
+        },
+        onMouseLeave: (e: any) => {
+          onPointerLeave?.(e);
+        },
+        onFocus: onFocus || (() => {}),
+        onBlur: onBlur || (() => {}),
+        'aria-describedby': ariaDescribedby,
+      };
+    }, [ref, onPointerMove, onPointerLeave, onPointerDown, onFocus, onBlur, ariaDescribedby]);
+
+    const rendered = render(triggerProps);
+    if (React.isValidElement(rendered)) {
+      return rendered;
+    }
+    return <span>{rendered}</span>;
+  }
+);
+FunctionTrigger.displayName = 'FunctionTrigger';
+
 export function Tooltip({
   content,
   children,
@@ -108,32 +152,23 @@ export function Tooltip({
   anchorClassName,
 }: TooltipProps) {
   if (isUiMigrationEnabled('tooltip')) {
-    if (disabled) {
-      if (typeof children === 'function') {
-        return <>{children({
-          ref: () => {},
-          onMouseEnter: () => {},
-          onMouseLeave: () => {},
-          onFocus: () => {},
-          onBlur: () => {},
-        })}</>;
-      }
-      return <>{children}</>;
+    if (typeof children === 'function') {
+      return (
+        <HanaTooltip
+          content={content}
+          side={placement}
+          align={align}
+          delayDuration={delayMs}
+          disabled={disabled}
+        >
+          <FunctionTrigger render={children} />
+        </HanaTooltip>
+      );
     }
 
-    const resolvedAnchor = typeof children === 'function'
-      ? <span className={anchorClassName}>{children({
-          ref: () => {},
-          onMouseEnter: () => {},
-          onMouseLeave: () => {},
-          onFocus: () => {},
-          onBlur: () => {},
-        })}</span>
-      : children;
-
-    const element = React.isValidElement(resolvedAnchor)
-      ? resolvedAnchor
-      : <span className={anchorClassName}>{resolvedAnchor}</span>;
+    const element = React.isValidElement(children)
+      ? children
+      : <span className={anchorClassName}>{children}</span>;
 
     return (
       <HanaTooltip
@@ -141,6 +176,7 @@ export function Tooltip({
         side={placement}
         align={align}
         delayDuration={delayMs}
+        disabled={disabled}
       >
         {element as React.ReactElement}
       </HanaTooltip>
