@@ -1,165 +1,66 @@
-import { useCallback, useState } from 'react';
+import React from 'react';
+import { useStore } from '../stores';
+import { loadUltraworkPanel } from '../stores/ultrawork-actions';
 import { usePanel } from '../hooks/use-panel';
-import { hanaFetch } from '../hooks/use-hana-fetch';
-import { formatSessionDate } from '../utils/format';
+import { UltraworkRunList } from './ultrawork/UltraworkRunList';
+import { UltraworkRunDetail } from './ultrawork/UltraworkRunDetail';
 import fp from './FloatingPanels.module.css';
-
-interface UltraworkRunSummary {
-  id: string;
-  goal: string;
-  mode: string;
-  intent: string;
-  status: string;
-  sessionPath?: string | null;
-  workPackets?: Array<{ id: string; title: string; kind: string; status: string; agent: string }>;
-  artifacts?: Array<{ id: string; kind: string; title: string; exportedFile?: { fileId?: string | null; filePath?: string | null } | null }>;
-  updatedAt?: string;
-  createdAt?: string;
-}
-
-interface UltraworkCapabilities {
-  modes?: string[];
-  actions?: string[];
-  workPacketKinds?: string[];
-  packetRunners?: Array<{ kind: string; name: string | null }>;
-  artifactExport?: boolean;
-  textGeneration?: boolean;
-}
-
-const PANEL_STYLE: React.CSSProperties = { display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 };
-const STACK_STYLE: React.CSSProperties = { display: 'flex', flexDirection: 'column', gap: 'var(--space-sm)' };
-const CARD_STYLE: React.CSSProperties = {
-  border: '1px solid var(--overlay-light)',
-  borderRadius: 'var(--radius-md)',
-  background: 'var(--bg-card, var(--bg))',
-  padding: 'var(--space-md)',
-};
-const CARD_HEADER_STYLE: React.CSSProperties = { display: 'flex', justifyContent: 'space-between', gap: 'var(--space-sm)', alignItems: 'flex-start' };
-const TITLE_STYLE: React.CSSProperties = { fontSize: '0.82rem', fontWeight: 600, color: 'var(--text)', lineHeight: 1.35 };
-const META_TEXT_STYLE: React.CSSProperties = { fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: 3 };
-const META_STYLE: React.CSSProperties = { display: 'flex', flexWrap: 'wrap', gap: '6px', marginTop: 9 };
-const PILL_STYLE: React.CSSProperties = {
-  fontSize: '0.68rem',
-  color: 'var(--text-muted)',
-  border: '1px solid var(--overlay-light)',
-  borderRadius: 999,
-  padding: '2px 7px',
-};
-const BADGE_STYLE: React.CSSProperties = {
-  ...PILL_STYLE,
-  color: 'var(--text)',
-  background: 'rgba(var(--accent-rgb), 0.055)',
-  borderColor: 'rgba(var(--accent-rgb), 0.18)',
-};
-const DESCRIPTION_STYLE: React.CSSProperties = { ...META_TEXT_STYLE, marginTop: 9, lineHeight: 1.5 };
+import css from './ultrawork/UltraworkPanel.module.css';
 
 export function UltraworkPanel() {
-  const [runs, setRuns] = useState<UltraworkRunSummary[]>([]);
-  const [capabilities, setCapabilities] = useState<UltraworkCapabilities | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const t = window.t ?? ((p: string) => p);
+  const runs = useStore((s) => s.ultraworkRuns);
+  const selectedRunId = useStore((s) => s.selectedUltraworkRunId);
+  const capabilities = useStore((s) => s.ultraworkCapabilities);
+  const loading = useStore((s) => s.ultraworkLoading);
+  const error = useStore((s) => s.ultraworkError);
 
-  const loadData = useCallback(() => {
-    setLoading(true);
-    setError(null);
-    Promise.all([
-      hanaFetch('/api/ultrawork/capabilities').then(res => res.json()),
-      hanaFetch('/api/ultrawork/runs?limit=12').then(res => res.json()),
-    ])
-      .then(([capabilityData, runData]) => {
-        setCapabilities(capabilityData || null);
-        setRuns(Array.isArray(runData?.runs) ? runData.runs : []);
-      })
-      .catch((err: unknown) => {
-        console.warn('[ultrawork] fetch panel data failed:', err);
-        setError(err instanceof Error ? err.message : String(err));
-      })
-      .finally(() => setLoading(false));
-  }, []);
+  const t = (window as any).t ?? ((p: string) => p);
 
-  const { visible, close } = usePanel('ultrawork', loadData, []);
+  const { visible, close: closePanel } = usePanel('ultrawork', loadUltraworkPanel, []);
+
+  const selectedRun = runs.find((r) => r.id === selectedRunId);
+
   if (!visible) return null;
 
   return (
     <div className={fp.floatingPanel} id="ultraworkPanel">
       <div className={fp.floatingPanelInner}>
-        <div style={PANEL_STYLE}>
-          <div className={fp.floatingPanelHeader}>
-            <h2 className={fp.floatingPanelTitle}>Omni Ultrawork</h2>
-            <button className={fp.floatingPanelClose} onClick={close} aria-label={t('common.close')}>
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <line x1="18" y1="6" x2="6" y2="18" />
-                <line x1="6" y1="6" x2="18" y2="18" />
-              </svg>
-            </button>
-          </div>
-          <div className={fp.floatingPanelBody}>
-            <div style={STACK_STYLE}>
-              <CapabilityCard capabilities={capabilities} loading={loading} error={error} />
-              {runs.length === 0 ? (
-                <div className={fp.activityEmpty}>{loading ? 'Loading Ultrawork runs...' : 'No Ultrawork runs yet.'}</div>
-              ) : runs.map(run => <RunCard key={run.id} run={run} />)}
+        <div className={css.panel}>
+          <div className={css.panelHeader}>
+            <h2 className={css.panelTitle}>Omni Ultrawork</h2>
+            <div className={css.headerActions}>
+              {!selectedRun && (
+                <button className={css.refreshBtn} onClick={loadUltraworkPanel} disabled={loading} title="Refresh panel">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ animation: loading ? 'spin 1s linear infinite' : 'none' }}>
+                    <path d="M23 4v6h-6M1 20v-6h6" />
+                    <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
+                  </svg>
+                </button>
+              )}
+              <button className={css.closeBtn} onClick={closePanel} aria-label={t('common.close')}>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <line x1="18" y1="6" x2="6" y2="18" />
+                  <line x1="6" y1="6" x2="18" y2="18" />
+                </svg>
+              </button>
             </div>
           </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function CapabilityCard({ capabilities, loading, error }: { capabilities: UltraworkCapabilities | null; loading: boolean; error: string | null }) {
-  const actions = capabilities?.actions || [];
-  const runners = capabilities?.packetRunners || [];
-  return (
-    <div style={CARD_STYLE}>
-      <div style={CARD_HEADER_STYLE}>
-        <div>
-          <div style={TITLE_STYLE}>Runtime capabilities</div>
-          <div style={META_TEXT_STYLE}>
-            {loading ? 'Refreshing...' : error ? `Unavailable: ${error}` : 'Live API snapshot'}
+          <div className={fp.floatingPanelBody}>
+            {selectedRun ? (
+              <UltraworkRunDetail run={selectedRun} />
+            ) : (
+              <UltraworkRunList runs={runs} capabilities={capabilities} loading={loading} error={error} />
+            )}
           </div>
         </div>
       </div>
-      <div style={META_STYLE}>
-        <span style={PILL_STYLE}>actions {actions.length}</span>
-        <span style={PILL_STYLE}>runners {runners.length}</span>
-        <span style={PILL_STYLE}>artifact export {capabilities?.artifactExport ? 'on' : 'off'}</span>
-        <span style={PILL_STYLE}>text gen {capabilities?.textGeneration ? 'on' : 'off'}</span>
-      </div>
-      {actions.length > 0 && <div style={DESCRIPTION_STYLE}>{actions.join(' · ')}</div>}
+      <style>{`
+        @keyframes spin {
+          from { transform: rotate(0deg); }
+          to { transform: rotate(360deg); }
+        }
+      `}</style>
     </div>
   );
 }
 
-function RunCard({ run }: { run: UltraworkRunSummary }) {
-  const packets = run.workPackets || [];
-  const artifacts = run.artifacts || [];
-  const exported = artifacts.filter(artifact => artifact.exportedFile?.fileId || artifact.exportedFile?.filePath).length;
-  const terminalPackets = packets.filter(packet => ['completed', 'failed', 'cancelled'].includes(packet.status)).length;
-  const updated = run.updatedAt ? formatSessionDate(run.updatedAt) : '';
-
-  return (
-    <div style={CARD_STYLE}>
-      <div style={CARD_HEADER_STYLE}>
-        <div>
-          <div style={TITLE_STYLE}>{run.goal || run.id}</div>
-          <div style={META_TEXT_STYLE}>{updated || run.id}</div>
-        </div>
-        <span style={BADGE_STYLE}>{run.status}</span>
-      </div>
-      <div style={META_STYLE}>
-        <span style={PILL_STYLE}>{run.mode}</span>
-        <span style={PILL_STYLE}>{run.intent}</span>
-        <span style={PILL_STYLE}>packets {terminalPackets}/{packets.length}</span>
-        <span style={PILL_STYLE}>artifacts {exported}/{artifacts.length} exported</span>
-      </div>
-      {packets.length > 0 && (
-        <div style={DESCRIPTION_STYLE}>
-          {packets.slice(0, 4).map(packet => `${packet.kind}:${packet.status}`).join(' · ')}
-          {packets.length > 4 ? ` · +${packets.length - 4}` : ''}
-        </div>
-      )}
-    </div>
-  );
-}
