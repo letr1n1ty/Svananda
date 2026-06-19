@@ -17,7 +17,7 @@ import { openFilePreview } from '../../utils/file-preview';
 import { isImageOrSvgExt, extOfName, kindOfFileName } from '../../utils/file-kind';
 import { getUserAttachmentImageSrc } from '../../utils/user-attachment-media';
 import { AgentAvatar, resolveAgentDisplayInfo } from '../../utils/agent-display';
-import { replayLatestUserMessage } from '../../stores/message-turn-actions';
+import { replayLatestUserMessage, branchFromMessage } from '../../stores/message-turn-actions';
 import styles from './Chat.module.css';
 import badgeStyles from '../input/SkillBadgeView.module.css';
 
@@ -62,6 +62,7 @@ export const UserMessage = memo(function UserMessage({
   const [editing, setEditing] = useState(false);
   const [editValue, setEditValue] = useState(message.text || '');
   const [busy, setBusy] = useState(false);
+  const [branching, setBranching] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 
   useEffect(() => {
@@ -103,6 +104,16 @@ export const UserMessage = memo(function UserMessage({
     setEditValue(message.text || '');
     setEditing(true);
   }, [busy, isStreaming, message.text]);
+
+  const handleBranch = useCallback(async () => {
+    if (branching || busy || isStreaming || !message.sourceEntryId) return;
+    setBranching(true);
+    try {
+      await branchFromMessage(sessionPath, message);
+    } finally {
+      setBranching(false);
+    }
+  }, [branching, busy, isStreaming, message, sessionPath]);
 
   const handleCancelEdit = useCallback(() => {
     if (busy) return;
@@ -164,7 +175,17 @@ export const UserMessage = memo(function UserMessage({
       disabled: isStreaming || busy,
     },
   ] : [], [busy, canShowLatestActions, copied, handleCopy, handleEdit, handleRegenerate, isStreaming, t]);
-  const footerActions = editing ? editingActions : latestActions;
+  const branchAction: MessageFooterAction[] = useMemo(() => (
+    !readOnly && !!message.sourceEntryId && !editing ? [{
+      id: 'branch',
+      title: t('chat.branchFromHere'),
+      icon: <BranchIcon />,
+      onClick: () => { void handleBranch(); },
+      disabled: isStreaming || busy || branching,
+      active: branching,
+    }] : []
+  ), [branching, busy, editing, handleBranch, isStreaming, message.sourceEntryId, readOnly, t]);
+  const footerActions = editing ? editingActions : [...latestActions, ...branchAction];
   const hasSkillBadges = !!message.skills?.length;
   const hasTextBubble = editing || !!message.textHtml || hasSkillBadges;
 
@@ -403,6 +424,17 @@ function XIcon() {
     <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
       <path d="M18 6 6 18" />
       <path d="m6 6 12 12" />
+    </svg>
+  );
+}
+
+function BranchIcon() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+      <line x1="6" y1="3" x2="6" y2="15" />
+      <circle cx="18" cy="6" r="3" />
+      <circle cx="6" cy="18" r="3" />
+      <path d="M18 9a9 9 0 0 1-9 9" />
     </svg>
   );
 }

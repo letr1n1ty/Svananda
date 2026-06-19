@@ -158,15 +158,25 @@ export function ContextRing() {
             </button>
           )}
         </Tooltip>
-        <button
-          type="button"
-          className={styles['context-ring-menu-item']}
-          role="menuitem"
-          onClick={handleCompact}
-          disabled={busy}
+        <Tooltip
+          content={t('input.compactTooltip')}
+          placement="left"
+          align="center"
         >
-          {t('input.compact')}
-        </button>
+          {({ ref, ...tooltipProps }) => (
+            <button
+              type="button"
+              ref={ref}
+              className={styles['context-ring-menu-item']}
+              role="menuitem"
+              onClick={handleCompact}
+              disabled={busy}
+              {...tooltipProps}
+            >
+              {t('input.compact')}
+            </button>
+          )}
+        </Tooltip>
       </AnchoredPortal>
     </>
   );

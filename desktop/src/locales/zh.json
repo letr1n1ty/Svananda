@@ -262,6 +262,8 @@
     "compacting": "上下文压缩中",
     "visionAuxiliary": "辅助视觉",
     "fileExpired": "文件已过期",
+    "branchFromHere": "从这里分支",
+    "branchSwitched": "已切换到此分支",
     "fileActions": {
       "more": "更多文件操作",
       "revealInFinder": "打开文件夹",
@@ -375,7 +377,8 @@
     "contextActions": "上下文操作",
     "refreshAndCompact": "更新并压缩",
     "refreshAndCompactTooltip": "更新到最新的记忆和工具集",
-    "compact": "压缩"
+    "compact": "压缩",
+    "compactTooltip": "仅压缩对话历史，节省上下文 Token"
   },
   "slash": {
     "diary": "写今日日记",
@@ -1392,7 +1395,10 @@
       "addCustom": "添加自定义供应商",
       "noKey": "未配置",
       "remove": "移除",
-      "deleteConfirm": "确定删除供应商 {name}？相关模型将一并清除。"
+      "deleteConfirm": "确定删除供应商 {name}？相关模型将一并清除。",
+      "rename": "重命名",
+      "nameExists": "供应商名称 {name} 已存在",
+      "renamed": "已成功将供应商重命名为 {to}"
     },
     "usage": {
       "title": "用量统计",

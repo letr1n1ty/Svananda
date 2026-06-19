@@ -224,6 +224,68 @@ export function createConfigRoute(engine: any) {
     }
   });
 
+  // 重新命名自訂供應商
+  route.post("/providers/rename", async (c) => {
+    try {
+      const body = await safeJson(c);
+      const { oldId, newId } = body || {};
+      if (!oldId || !newId) {
+        return c.json({ error: "Missing oldId or newId" }, 400);
+      }
+      const cleanOld = oldId.trim().toLowerCase();
+      const cleanNew = newId.trim().toLowerCase();
+      if (cleanOld === cleanNew) {
+        return c.json({ ok: true });
+      }
+
+      // 从原始配置中读取未脱敏的 providers
+      const raw = getRawConfig(engine.configPath) || {};
+      const providers = raw.providers || {};
+      const oldConfig = providers[cleanOld];
+      if (!oldConfig) {
+        return c.json({ error: `Provider ${cleanOld} not found` }, 404);
+      }
+      if (providers[cleanNew]) {
+        return c.json({ error: `Provider ${cleanNew} already exists` }, 409);
+      }
+
+      // 检查并更新全局模型引用中的 provider ID
+      const models = raw.models || {};
+      let modelsChanged = false;
+      const nextModels = { ...models };
+      for (const key of ["chat", "embedding", "utility", "utility_large"]) {
+        const m = models[key];
+        if (typeof m === "string") {
+          const parts = m.split("/");
+          if (parts[0] === cleanOld) {
+            parts[0] = cleanNew;
+            nextModels[key] = parts.join("/");
+            modelsChanged = true;
+          }
+        } else if (m && typeof m === "object") {
+          if (m.provider === cleanOld) {
+            nextModels[key] = { ...m, provider: cleanNew };
+            modelsChanged = true;
+          }
+        }
+      }
+
+      // 执行重命名：写入 cleanNew 并删除 cleanOld (设为 null)
+      await engine.updateConfig({
+        providers: {
+          [cleanNew]: oldConfig,
+          [cleanOld]: null
+        },
+        ...(modelsChanged ? { models: nextModels } : {})
+      });
+
+      return c.json({ ok: true });
+    } catch (err) {
+      debugLog()?.error("api", `POST /api/providers/rename failed: ${err.message}`);
+      return c.json({ error: err.message }, 500);
+    }
+  });
+
   route.post("/config/workspaces/recent", async (c) => {
     try {
       const body = await safeJson(c);

@@ -258,10 +258,16 @@
     "send": "Send",
     "steer": "Steer",
     "stop": "Stop",
+    "queue": "Queue",
+    "queueTooltip": "Queue message (Option+Enter to steer instead)",
+    "queuedCount": "{count} queued",
+    "queueAdded": "Message queued",
     "browserScreenshot": "Browser screenshot",
     "compacting": "Compacting context",
     "visionAuxiliary": "Vision auxiliary",
     "fileExpired": "File expired",
+    "branchFromHere": "Branch from here",
+    "branchSwitched": "Switched to this branch",
     "fileActions": {
       "more": "More file actions",
       "revealInFinder": "Reveal in file manager",
@@ -375,7 +381,8 @@
     "contextActions": "Context actions",
     "refreshAndCompact": "Update and compact",
     "refreshAndCompactTooltip": "Update to the latest memory and tool set",
-    "compact": "Compact"
+    "compact": "Compact",
+    "compactTooltip": "Compact conversation history to save tokens"
   },
   "slash": {
     "diary": "Write today's diary",
@@ -1536,7 +1543,10 @@
       "addCustom": "Add Custom Provider",
       "noKey": "Not configured",
       "remove": "Remove",
-      "deleteConfirm": "Delete provider {name}? Associated models will be removed."
+      "deleteConfirm": "Delete provider {name}? Associated models will be removed.",
+      "rename": "Rename",
+      "nameExists": "Provider name {name} already exists",
+      "renamed": "Successfully renamed provider to {to}"
     },
     "usage": {
       "title": "Usage",

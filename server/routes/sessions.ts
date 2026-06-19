@@ -56,6 +56,7 @@ import {
   resolveModelVideoInputTransport,
 } from "../../shared/model-capabilities.ts";
 import { replayLatestUserTurn } from "../../core/session-turn-actions.ts";
+import { branchSessionToEntry } from "../../core/session-branch-actions.ts";
 import { createRequestContext } from "../http/boundary.ts";
 import { createModuleLogger } from "../../lib/debug-log.ts";
 import { searchSessions } from "../../lib/search/session-search.ts";
@@ -1055,6 +1056,52 @@ export function createSessionsRoute(engine, hub = null) {
         replacementText: typeof body.text === "string" ? body.text : undefined,
         displayMessage: body.displayMessage || null,
         uiContext: body.uiContext ?? null,
+      });
+      return c.json({ ok: true, ...result });
+    } catch (err) {
+      const status = err.message === "session_busy" ? 409 : 400;
+      return c.json({ error: err.message }, status);
+    }
+  });
+
+  route.post("/sessions/branch", async (c) => {
+    try {
+      const requestContext = createRequestContext(c, engine);
+      const body = await safeJson(c);
+      const sessionPath = body?.path || body?.sessionPath || null;
+      const sourceEntryId = body?.sourceEntryId || null;
+
+      if (!sessionPath) {
+        return c.json({ error: t("error.missingParam", { param: "path" }) }, 400);
+      }
+      if (!sourceEntryId) {
+        return c.json({ error: t("error.missingParam", { param: "sourceEntryId" }) }, 400);
+      }
+
+      const auth = authorizeSessionRoute(requestContext, "sessions.write", {
+        kind: "session",
+        studioId: requestContext.studioId,
+        sessionPath,
+      });
+      if (!auth.allowed) return c.json({ error: "insufficient_scope", reason: auth.reason }, 403);
+
+      if (!isActiveDesktopSessionPath(sessionPath, engine.agentsDir)) {
+        return c.json({ error: "Invalid session path" }, 403);
+      }
+      if (isDeletedAgentSessionPath(sessionPath)) {
+        return rejectDeletedAgentSession(c);
+      }
+      if (!(await pathExists(sessionPath))) {
+        return c.json({ error: "session not found" }, 404);
+      }
+      if (engine.isSessionStreaming?.(sessionPath)) {
+        return c.json({ error: "session_busy" }, 409);
+      }
+
+      const result = await branchSessionToEntry(engine, {
+        sessionPath,
+        sourceEntryId,
+        clientMessageId: body.clientMessageId || null,
       });
       return c.json({ ok: true, ...result });
     } catch (err) {

@@ -254,6 +254,8 @@
     "compacting": "コンテキスト圧縮中",
     "visionAuxiliary": "補助ビジョン",
     "fileExpired": "ファイル期限切れ",
+    "branchFromHere": "ここから分岐",
+    "branchSwitched": "このブランチに切り替えました",
     "fileActions": {
       "more": "その他のファイル操作",
       "revealInFinder": "ファイルマネージャーで表示",
@@ -342,7 +344,8 @@
     "contextActions": "コンテキスト操作",
     "refreshAndCompact": "更新して圧縮",
     "refreshAndCompactTooltip": "最新の記憶とツールセットに更新",
-    "compact": "圧縮"
+    "compact": "圧縮",
+    "compactTooltip": "対話履歴のみを圧縮し、トークンを節約します"
   },
   "slash": {
     "diary": "今日の日記を書く",
@@ -1256,7 +1259,10 @@
       "addCustom": "カスタムプロバイダーを追加",
       "noKey": "未設定",
       "remove": "削除",
-      "deleteConfirm": "プロバイダー {name} を削除しますか？関連するモデルも削除されます。"
+      "deleteConfirm": "プロバイダー {name} を削除しますか？関連するモデルも削除されます。",
+      "rename": "名前変更",
+      "nameExists": "プロバイダー名 {name} は既に存在します",
+      "renamed": "プロバイダーの名前を {to} に変更しました"
     },
     "usage": {
       "title": "使用量",

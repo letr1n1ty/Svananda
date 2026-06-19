@@ -16,7 +16,7 @@ import {
 } from './workspace-ui-state-actions';
 import { hasServerConnection } from '../services/server-connection';
 import { isWebRuntime } from '../utils/platform-runtime';
-import { mergeWorkspaceHistory, normalizeWorkspacePath, removeWorkspaceHistoryEntries } from '../../../../shared/workspace-history.ts';
+import { mergeWorkspaceHistory, normalizeWorkspacePath } from '../../../../shared/workspace-history.ts';
 
 /* eslint-disable @typescript-eslint/no-explicit-any -- store setState 回调及 IPC callback data */
 
@@ -148,16 +148,16 @@ export async function createLocalStudioWorkspaceFromFolder(folder: string): Prom
 }
 
 export async function removeStudioWorkspace(mountId: string): Promise<boolean> {
-  const { hanaFetch } = useStore.getState();
   if (!hanaFetch) return false;
   const normalizedMountId = normalizeMountId(mountId);
   if (!normalizedMountId || normalizedMountId === 'default') return false;
   
   try {
-    const data = await hanaFetch(`/api/studio/workspaces/${encodeURIComponent(normalizedMountId)}`, {
+    const res = await hanaFetch(`/api/studio/workspaces/${encodeURIComponent(normalizedMountId)}`, {
       method: 'DELETE',
     });
-    if (!data?.ok) throw new Error(data?.error || 'failed to remove workspace');
+    const data = await res.json();
+    if (data.error) throw new Error(String(data.error));
     
     useStore.setState((state: any) => ({
       studioWorkspaces: (state.studioWorkspaces || []).filter((item: StudioWorkspace) => item.mountId !== normalizedMountId),

@@ -32,6 +32,7 @@ import { TODO_TOOL_NAMES, type TodoToolName } from '../utils/todo-constants';
 import { applyTodoLifecycle, migrateLegacyTodos } from '../utils/todo-compat';
 import { renderMarkdown } from '../utils/markdown';
 import { bumpMessageLiveVersion } from '../stores/message-live-version';
+import { loadMessages } from '../stores/session-actions';
 
 declare function t(key: string, vars?: Record<string, string>): any;
 
@@ -210,10 +211,9 @@ export function applyStreamingStatus(
   isStreaming: boolean,
   sessionPath: string | null,
   identity: { streamId?: string | null; turnId?: string | null } = {},
+  branchEntryIds?: Array<{ id: string; role: string }>,
 ): boolean {
   // 元数据层：把 isStreaming 视为 sessionPath 维度的权威信号，统一写回 streamingSessions。
-  // 这一层不分焦点，任何来源（普通 status、stream_resume 恢复）都必须到达这里，
-  // 否则重连后服务端说「已结束」前端却留着旧的 streaming 标记，UI 会卡在"思考中"。
   const wasStreaming = !!sessionPath && useStore.getState().streamingSessions.includes(sessionPath);
   if (sessionPath) {
     if (isStreaming) {
@@ -231,6 +231,15 @@ export function applyStreamingStatus(
     if (sessionPath && sessionPath !== focused) {
       useStore.getState().markSessionOutputUnread?.(sessionPath);
     }
+    // 用 branchEntryIds 直接 patch sourceEntryId（server 支援時）
+    if (sessionPath && Array.isArray(branchEntryIds) && branchEntryIds.length > 0) {
+      patchSourceEntryIds(sessionPath, branchEntryIds);
+    }
+    // 延遲 500ms 後 reload 歷史，補填 sourceEntryId（繞過競態護欄：此時 version 已穩定）
+    if (sessionPath) {
+      const sp = sessionPath;
+      setTimeout(() => { void loadMessages(sp); }, 500);
+    }
   }
 
   // 渲染层：只有焦点 session 才影响 UI 占位 / sessions 列表。
@@ -242,6 +251,43 @@ export function applyStreamingStatus(
     scheduleSessionsRefresh('optimistic_session_settled');
   }
   return true;
+}
+
+/** 依 role 順序把 branch entryIds 回填到 store 訊息的 sourceEntryId */
+function patchSourceEntryIds(
+  sessionPath: string,
+  branchEntryIds: Array<{ id: string; role: string }>,
+): void {
+  useStore.setState((s: any) => {
+    const session = s.chatSessions?.[sessionPath];
+    if (!session?.items) return {};
+    // 分別建立 user / assistant entry 的 queue（保持原始順序）
+    const userQueue = branchEntryIds.filter(e => e.role === 'user').map(e => e.id);
+    const assistantQueue = branchEntryIds.filter(e => e.role === 'assistant').map(e => e.id);
+    let ui = 0; // user index
+    let ai = 0; // assistant index
+    const newItems = session.items.map((item: any) => {
+      if (item.type !== 'message') return item;
+      const msg = item.data;
+      if (msg.role === 'user' && ui < userQueue.length) {
+        const entryId = userQueue[ui++];
+        if (msg.sourceEntryId === entryId) return item;
+        return { ...item, data: { ...msg, sourceEntryId: entryId } };
+      }
+      if (msg.role === 'assistant' && ai < assistantQueue.length) {
+        const entryId = assistantQueue[ai++];
+        if (msg.sourceEntryId === entryId) return item;
+        return { ...item, data: { ...msg, sourceEntryId: entryId } };
+      }
+      return item;
+    });
+    return {
+      chatSessions: {
+        ...s.chatSessions,
+        [sessionPath]: { ...session, items: newItems },
+      },
+    };
+  });
 }
 
 function attachmentsEqual(a: any, b: any): boolean {
@@ -588,6 +634,7 @@ export function handleServerMessage(msg: any): void {
           quotedText: msg.message.quotedText,
           skills: msg.message.skills,
           deskContext: msg.message.deskContext ?? undefined,
+          sourceEntryId: msg.message.entryId || msg.message.sourceEntryId || undefined,
         },
       });
       bumpMessageLiveVersion(sp);
@@ -832,7 +879,7 @@ export function handleServerMessage(msg: any): void {
       const applied = applyStreamingStatus(msg.isStreaming, sp, {
         streamId: msg.streamId ?? null,
         turnId: msg.turnId ?? null,
-      });
+      }, msg.branchEntryIds);
       if (sp && applied) {
         if (msg.isStreaming) streamBufferManager.beginTurn(sp);
         else streamBufferManager.finishTurn(sp);

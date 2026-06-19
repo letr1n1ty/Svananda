@@ -33,8 +33,10 @@ interface Props {
   audioRecordingBusy: boolean;
   onAudioToggle: () => void;
   onSend: () => void;
+  onQueue: () => void;
   onSteer: () => void;
   onStop: () => void;
+  isOptionHeld: boolean;
 }
 
 /** 编辑器下方的工具按钮行 + 发送控制 */
@@ -45,7 +47,7 @@ export const InputControlBar = memo(function InputControlBar(props: Props) {
     showThinking, thinkingLevel, onThinkingChange, modelXhigh,
     models, sessionModel, isStreaming, hasInput, canSend,
     showAudioInput, audioRecordingActive, audioRecordingBusy, onAudioToggle,
-    onSend, onSteer, onStop,
+    onSend, onQueue, onSteer, onStop, isOptionHeld,
   } = props;
 
   return (
@@ -107,7 +109,9 @@ export const InputControlBar = memo(function InputControlBar(props: Props) {
           </button>
         )}
         <SendButton isStreaming={isStreaming} hasInput={hasInput}
-          disabled={isStreaming ? false : !canSend} onSend={onSend} onSteer={onSteer} onStop={onStop} />
+          disabled={isStreaming ? false : !canSend}
+          isOptionHeld={isOptionHeld}
+          onSend={onSend} onQueue={onQueue} onSteer={onSteer} onStop={onStop} />
       </div>
     </div>
   );

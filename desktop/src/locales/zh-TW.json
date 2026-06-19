@@ -250,10 +250,16 @@
     "send": "傳送",
     "steer": "插話",
     "stop": "停止",
+    "queue": "排隊",
+    "queueTooltip": "排隊送出（Option+Enter 改為插話）",
+    "queuedCount": "已排 {count} 則",
+    "queueAdded": "訊息已加入排隊",
     "browserScreenshot": "瀏覽器截圖",
     "compacting": "上下文壓縮中",
     "visionAuxiliary": "輔助視覺",
     "fileExpired": "檔案已過期",
+    "branchFromHere": "從這裡分支",
+    "branchSwitched": "已切換到此分支",
     "fileActions": {
       "more": "更多檔案操作",
       "revealInFinder": "在 Finder 中顯示",
@@ -342,7 +348,8 @@
     "contextActions": "上下文操作",
     "refreshAndCompact": "更新並壓縮",
     "refreshAndCompactTooltip": "更新到最新的記憶和工具集",
-    "compact": "壓縮"
+    "compact": "壓縮",
+    "compactTooltip": "僅壓縮對話歷史，節省上下文 Token"
   },
   "slash": {
     "diary": "寫今日日記",
@@ -1400,7 +1407,10 @@
       "addCustom": "新增自訂供應商",
       "noKey": "未設定",
       "remove": "移除",
-      "deleteConfirm": "確定刪除供應商 {name}？相關模型將一併清除。"
+      "deleteConfirm": "確定刪除供應商 {name}？相關模型將一併清除。",
+      "rename": "重新命名",
+      "nameExists": "供應商名稱 {name} 已存在",
+      "renamed": "已成功將供應商重新命名為 {to}"
     },
     "usage": {
       "title": "用量統計",

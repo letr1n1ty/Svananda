@@ -254,6 +254,8 @@
     "compacting": "컨텍스트 압축 중",
     "visionAuxiliary": "보조 시각",
     "fileExpired": "파일 만료됨",
+    "branchFromHere": "여기서 분기",
+    "branchSwitched": "이 브랜치로 전환됨",
     "fileActions": {
       "more": "파일 작업 더 보기",
       "revealInFinder": "파일 관리자에서 보기",
@@ -342,7 +344,8 @@
     "contextActions": "컨텍스트 작업",
     "refreshAndCompact": "업데이트 후 압축",
     "refreshAndCompactTooltip": "최신 메모리와 도구 세트로 업데이트",
-    "compact": "압축"
+    "compact": "압축",
+    "compactTooltip": "대화 기록만 압축하여 토큰을 절약합니다"
   },
   "slash": {
     "diary": "오늘의 일기 쓰기",
@@ -1256,7 +1259,10 @@
       "addCustom": "커스텀 Provider 추가",
       "noKey": "미설정",
       "remove": "제거",
-      "deleteConfirm": "Provider {name}을(를) 삭제할까요? 연결된 모델도 함께 제거돼요."
+      "deleteConfirm": "Provider {name}을(를) 삭제할까요? 연결된 모델도 함께 제거돼요.",
+      "rename": "이름 변경",
+      "nameExists": "Provider 이름 {name}이(가) 이미 존재합니다",
+      "renamed": "Provider 이름을 {to}(으)로 성공적으로 변경했습니다"
     },
     "usage": {
       "title": "사용량",
