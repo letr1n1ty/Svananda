@@ -10,6 +10,7 @@ import { ChannelHeader } from '../channels/ChannelHeader';
 import { MainContent } from '../../MainContent';
 import { ChatPage } from './ChatPage';
 import { WorkspaceCompanionRail } from './WorkspaceCompanionRail';
+import { UltraworkPanel } from '../UltraworkPanel';
 
 const tr = (key: string, vars?: Record<string, string | number>) => window.t?.(key, vars) ?? key;
 
@@ -137,6 +138,7 @@ export function AppPages() {
         <ActivityPanel />
         <AutomationPanel />
         <BridgePanel />
+        <UltraworkPanel />
       </MainContent>
 
       {currentTab === 'chat' && <PreviewPanel />}
