@@ -1,3 +1,5 @@
+import type { ThinkingLevel } from './stores/model-slice';
+
 // ── Auto-update ──
 
 export interface AutoUpdateState {
@@ -58,6 +60,7 @@ export interface SessionCapabilityDrift {
 
 export interface Session {
   path: string;
+  sessionId?: string | null;
   title: string | null;
   firstMessage: string;
   modified: string;
@@ -111,6 +114,8 @@ export interface Model {
   isCurrent?: boolean;
   reasoning?: boolean;
   xhigh?: boolean;
+  thinkingLevels?: ThinkingLevel[];
+  defaultThinkingLevel?: ThinkingLevel;
   audio?: boolean;
   audioTransport?: string | null;
   audioTransportSupported?: boolean;
@@ -210,6 +215,8 @@ export interface PreviewItem {
   mime?: string;
   kind?: string;
   storageKind?: string;
+  sourceUrl?: string;
+  sourceRootPath?: string;
   status?: 'available' | 'expired' | string;
   missingAt?: number | null;
   fileVersion?: FileVersion | null;
@@ -264,7 +271,7 @@ export interface TodoItem {
 }
 
 // ── 浮动面板类型 ──
-export type ActivePanel = 'activity' | 'automation' | 'bridge' | null;
+export type ActivePanel = 'activity' | 'automation' | 'bridge' | 'skills' | null;
 export type TabType = 'chat' | 'channels' | `plugin:${string}`;
 export type RightWorkspaceTab = 'session-files' | 'workspace' | `plugin-widget:${string}`;
 
@@ -415,14 +422,6 @@ export interface PlatformApi {
   onMaximizeChange?(callback: (maximized: boolean) => void): void;
 
   // ── Browser viewer ──
-  updateBrowserViewer?(data: {
-    running?: boolean;
-    url?: string | null;
-    thumbnail?: string | null;
-    thumbnailCapturedAt?: number | null;
-    thumbnailUrl?: string | null;
-    thumbnailFresh?: boolean;
-  }): void;
   onBrowserUpdate?(callback: (data: BrowserViewerUpdate) => void): void | (() => void);
   closeBrowserViewer?(): void;
   closeBrowser?(): void;

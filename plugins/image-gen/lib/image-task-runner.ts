@@ -34,9 +34,33 @@ export function isResponseDelivery(value: any = {}) {
   return normalizeMediaDelivery(value).mode === "response";
 }
 
+function textOrNull(value) {
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+export function normalizeSessionRef(ctx) {
+  const rawRef = ctx?.sessionRef && typeof ctx.sessionRef === "object" ? ctx.sessionRef : null;
+  const sessionId = textOrNull(ctx?.sessionId) || textOrNull(rawRef?.sessionId);
+  const sessionPath =
+    textOrNull(ctx?.sessionPath)
+    || textOrNull(rawRef?.sessionPath)
+    || textOrNull(rawRef?.path);
+  const legacySessionPath =
+    textOrNull(ctx?.legacySessionPath)
+    || textOrNull(rawRef?.legacySessionPath)
+    || (sessionId && sessionPath ? sessionPath : null);
+  const sessionRef = sessionId
+    ? {
+      sessionId,
+      ...(sessionPath ? { sessionPath } : {}),
+      ...(legacySessionPath ? { legacySessionPath } : {}),
+    }
+    : null;
+  return { sessionId, sessionPath, sessionRef };
+}
+
 export function normalizeSessionPath(ctx) {
-  const sessionPath = typeof ctx?.sessionPath === "string" ? ctx.sessionPath.trim() : "";
-  return sessionPath || null;
+  return normalizeSessionRef(ctx).sessionPath;
 }
 
 export function generatedDirForCtx(ctx) {
@@ -81,6 +105,7 @@ export function buildImageParams(input) {
     ...(input.quality && { quality: input.quality }),
     ...(input.model && { model: input.model }),
     ...(image && { image }),
+    ...(input.options && typeof input.options === "object" && !Array.isArray(input.options) ? input.options : {}),
   };
 }
 
@@ -140,6 +165,7 @@ function targetFromAdapter(adapter, input, media: any = {}) {
     adapter,
     providerId: media.providerId || input.provider || adapter.id,
     modelId: media.modelId || input.model || null,
+    model: media.model || null,
     protocolId: media.protocolId || adapter.protocolId || null,
     credentialLaneId: media.credentialLaneId || null,
     credentialProviderId: media.credentialProviderId || media.providerId || input.provider || adapter.id,
@@ -181,6 +207,14 @@ function explicitModelError(modelId, detail = "") {
   return detail
     ? t("plugin.imageGen.modelUnavailableDetail", { modelId, detail })
     : t("plugin.imageGen.modelUnavailable", { modelId });
+}
+
+const IMAGE_MODE_IDS = new Set(["text2image", "image2image"]);
+
+function rejectModeAsModel(input: any = {}) {
+  const modelId = typeof input.model === "string" ? input.model.trim() : "";
+  if (!IMAGE_MODE_IDS.has(modelId)) return;
+  throw new Error(t("plugin.imageGen.modePassedAsModel", { modeId: modelId }));
 }
 
 async function availableAdapterOrThrow(adapter, submitCtx, providerId) {
@@ -315,6 +349,8 @@ async function legacyAdapterTarget(input, registry, submitCtx) {
 }
 
 export async function resolveImageTarget(input, registry, submitCtx) {
+  rejectModeAsModel(input);
+
   if (input.provider) {
     return targetFromExplicitProvider(input, registry, submitCtx);
   }
@@ -407,11 +443,10 @@ export async function retryImageTask({ taskId, ctx }) {
   if (task.status === "pending") return retryError(409, "task is already running");
   if (!isRetryableTaskStatus(task.status)) return retryError(409, "task is not retryable");
 
-  const sessionPath = typeof task.sessionPath === "string" && task.sessionPath.trim()
-    ? task.sessionPath
-    : null;
+  const sessionTarget = normalizeSessionRef(task);
+  const { sessionId, sessionPath, sessionRef } = sessionTarget;
   const responseDelivery = isResponseDelivery(task);
-  if (!sessionPath && !responseDelivery) return retryError(409, "task has no sessionPath");
+  if (!sessionId && !sessionPath && !responseDelivery) return retryError(409, "task has no sessionId or sessionPath");
 
   const adapter = registry.get(task.adapterId);
   if (!adapter || typeof adapter.submit !== "function") {
@@ -433,7 +468,7 @@ export async function retryImageTask({ taskId, ctx }) {
   const meta = imageDeferredMeta({ prompt, deliveryTarget });
 
   if (!responseDelivery) {
-    await ctx.bus.request("deferred:retry", { taskId, sessionPath, meta });
+    await ctx.bus.request("deferred:retry", { taskId, sessionId, sessionPath, sessionRef, meta });
   }
 
   const now = new Date().toISOString();
@@ -457,6 +492,8 @@ export async function retryImageTask({ taskId, ctx }) {
       await ctx.bus.request("task:register", {
         taskId,
         type: "media-generation",
+        sessionId,
+        sessionRef,
         parentSessionPath: sessionPath,
         meta,
       });

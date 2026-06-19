@@ -26,7 +26,13 @@ export const parameters = {
     resolution: { type: "string", description: t("toolDef.generateImage.resolutionDesc") },
     quality:    { type: "string", description: t("toolDef.generateImage.qualityDesc") },
     model:      { type: "string", description: t("toolDef.generateImage.modelDesc") },
+    mode:       { type: "string", description: t("toolDef.generateImage.modeDesc") },
     provider:   { type: "string", description: t("toolDef.generateImage.providerDesc") },
+    options: {
+      type: "object",
+      description: "Provider-specific optional generation parameters. Use media option discovery before filling uncommon keys.",
+      additionalProperties: true,
+    },
     suggestedFilename: { type: "string", description: t("toolDef.generateImage.suggestedFilenameDesc") },
   },
   required: ["prompt"],

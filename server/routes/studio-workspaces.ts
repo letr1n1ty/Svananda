@@ -4,6 +4,7 @@ import path from "path";
 import { Hono } from "hono";
 import { MountAwareFileError, MountAwareFileService } from "../../core/mount-aware-file-service.ts";
 import {
+  disableStudioMount,
   listStudioMountsForStudio,
   upsertStudioMount,
   removeStudioMount,
@@ -79,27 +80,23 @@ export function createStudioWorkspacesRoute(engine) {
         capability: "studio.workspace.remove_local_path",
       }, 403);
     }
-
     try {
-      const mountId = c.req.param("mountId");
-      if (!mountId || mountId === "default") {
-        return c.json({ error: "cannot_remove_default_mount" }, 400);
+      const mountId = c.req.param("mountId") || "";
+      if (mountId === "default") {
+        throw routeError("default workspace cannot be removed", "default_workspace", 400);
       }
-      
-      const removed = removeStudioMount(engine.hanakoHome, mountId);
-      
+      const mount = disableLocalPathWorkspace(engine, auth.requestContext, mountId);
       recordSecurityAuditEvent(c, engine, {
         action: "studio_workspace.remove_local_path",
         target: {
           kind: "studio",
           studioId: auth.requestContext?.studioId || null,
-          mountId: mountId,
+          mountId: mount.mountId,
         },
-        result: removed ? "success" : "not_found",
+        result: "success",
         decision: auth.decision || null,
       } as any);
-
-      return c.json({ ok: removed });
+      return c.json({ ok: true, mountId: mount.mountId });
     } catch (err) {
       return workspaceError(c, err);
     }
@@ -155,6 +152,17 @@ async function createLocalPathWorkspace(engine, requestContext, body) {
   });
   // 创建入口已由路由层强制 local owner；此处对称校验保证函数签名自包含。
   return workspaceFromMount(mount, { discloseNativeRoot: isLocalOwnerPrincipal(requestContext?.authPrincipal) });
+}
+
+function disableLocalPathWorkspace(engine, requestContext, mountId) {
+  const studioId = requireStudioId(requestContext);
+  const activeMount = listStudioMountsForStudio(engine.hanakoHome, studioId)
+    .find((mount) => mount.mountId === mountId && mount.status === "active");
+  if (!activeMount) throw routeError("workspace mount not found", "workspace_not_found", 404);
+  if (activeMount.sourceKind !== "storage" || activeMount.provider !== "local_fs") {
+    throw routeError("only local_fs workspace mounts can be removed here", "unsupported_workspace_mount", 400);
+  }
+  return disableStudioMount(engine.hanakoHome, mountId, { hostStudioId: studioId });
 }
 
 function authorizeStudioWorkspace(c, engine, capability) {

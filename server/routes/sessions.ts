@@ -46,7 +46,7 @@ import {
 } from "../../lib/session-files/session-file-registry.ts";
 import { serializeSessionFile } from "../../lib/session-files/session-file-response.ts";
 import { browserScreenshotPath } from "../../lib/session-files/browser-screenshot-file.ts";
-import { normalizeSessionThinkingLevel, modelSupportsXhigh } from "../../core/session-thinking-level.ts";
+import { getModelThinkingLevels, normalizeSessionThinkingLevel, modelSupportsXhigh, resolveModelDefaultThinkingLevel } from "../../core/session-thinking-level.ts";
 import {
   modelSupportsDirectAudioInput,
   modelSupportsDirectVideoInput,
@@ -152,6 +152,24 @@ function routeError(message, code, status) {
   return err;
 }
 
+function classifySessionCreationError(err) {
+  const message = err?.message || String(err);
+  if (err?.status && Number.isInteger(err.status)) {
+    return { status: err.status, body: { error: message, code: err.code || "session_create_failed" } };
+  }
+  if (
+    /no available model/i.test(message)
+    || /no available models/i.test(message)
+    || /没有可用的模型/.test(message)
+    || /沒有可用的模型/.test(message)
+    || /利用可能なモデルがありません/.test(message)
+    || /사용 가능한 모델이 없/.test(message)
+  ) {
+    return { status: 409, body: { error: message, code: "no_available_model" } };
+  }
+  return { status: 500, body: { error: message } };
+}
+
 const TODO_COMPLETE_MESSAGE =
   "[Hana Todo] The user marked the current todo list as completed and removed it from the session UI. Treat every item in that list as completed. Create a new todo list only if new work needs tracking.";
 
@@ -219,21 +237,69 @@ async function readSessionFileRevision(sessionPath) {
 export function createSessionsRoute(engine, hub = null) {
   const route = new Hono();
 
+  function resolveSessionCacheLocator(sessionPath) {
+    if (!sessionPath) return { cacheKey: null, readPath: null, sessionId: null };
+    const sessionId = engine.getSessionIdForPath?.(sessionPath) || null;
+    const manifest = sessionId ? engine.getSessionManifest?.(sessionId) || null : null;
+    const currentPath = typeof manifest?.currentLocator?.path === "string" && manifest.currentLocator.path
+      ? manifest.currentLocator.path
+      : sessionPath;
+    return {
+      cacheKey: sessionId || sessionPath,
+      readPath: currentPath,
+      sessionId,
+    };
+  }
+
+  function currentSessionPathForId(sessionId) {
+    if (!sessionId) return null;
+    const manifest = engine.getSessionManifest?.(sessionId) || null;
+    const currentPath = manifest?.currentLocator?.path;
+    return typeof currentPath === "string" && currentPath ? currentPath : null;
+  }
+
+  function resolveSubagentBlockSession(block, task = null, run = null) {
+    const rawSessionId =
+      block?.sessionId
+      || task?.meta?.sessionId
+      || run?.childSessionId
+      || null;
+    let sessionId = typeof rawSessionId === "string" && rawSessionId.trim() ? rawSessionId.trim() : null;
+    let sessionPath =
+      block?.streamKey
+      || task?.meta?.sessionPath
+      || run?.childSessionPath
+      || null;
+    if (typeof sessionPath !== "string" || !sessionPath.trim()) sessionPath = null;
+    if (!sessionId && sessionPath) {
+      sessionId = engine.getSessionIdForPath?.(sessionPath) || null;
+    }
+    if (sessionId) {
+      sessionPath = currentSessionPathForId(sessionId) || sessionPath;
+    }
+    return { sessionId, sessionPath };
+  }
+
   // session-meta.json sidecar 按 session 目录共享；同一个 request 里遍历几十个 block
   // 时不必每个 block 都重复 readFileSync + JSON.parse。调用端构造一次 Map 当 cache。
   function createSubagentMetaCache() {
     const map = new Map();
     return (sessionPath) => {
       if (!sessionPath) return null;
-      if (map.has(sessionPath)) return map.get(sessionPath);
-      const meta = readSubagentSessionMetaSync(sessionPath);
-      map.set(sessionPath, meta);
+      const { cacheKey, readPath } = resolveSessionCacheLocator(sessionPath);
+      if (!cacheKey || !readPath) return null;
+      if (map.has(cacheKey)) return map.get(cacheKey);
+      const meta = readSubagentSessionMetaSync(readPath);
+      map.set(cacheKey, meta);
       return meta;
     };
   }
 
   function applySubagentIdentity(block, task, readSessionMeta) {
-    const sessionPath = block.streamKey || task?.meta?.sessionPath || null;
+    const sessionRef = resolveSubagentBlockSession(block, task);
+    if (sessionRef.sessionId && !block.sessionId) block.sessionId = sessionRef.sessionId;
+    if (sessionRef.sessionPath) block.streamKey = sessionRef.sessionPath;
+    const sessionPath = sessionRef.sessionPath;
     const sessionMeta = readSessionMeta(sessionPath);
     const resolved =
       materializeExecutorIdentity(sessionMeta, engine.getAgent?.bind(engine))
@@ -257,7 +323,10 @@ export function createSessionsRoute(engine, hub = null) {
   }
 
   function patchBlockExecutorMetadata(block, task, readSessionMeta) {
-    const sessionPath = block.streamKey || task?.meta?.sessionPath || null;
+    const sessionRef = resolveSubagentBlockSession(block, task);
+    if (sessionRef.sessionId && !block.sessionId) block.sessionId = sessionRef.sessionId;
+    if (sessionRef.sessionPath) block.streamKey = sessionRef.sessionPath;
+    const sessionPath = sessionRef.sessionPath;
     const sessionMeta = readSessionMeta(sessionPath);
     const sources = [sessionMeta, task?.meta, block];
 
@@ -296,6 +365,7 @@ export function createSessionsRoute(engine, hub = null) {
       result: run.summary || null,
       reason: run.reason || run.summary || null,
       meta: {
+        sessionId: run.childSessionId || null,
         sessionPath: run.childSessionPath || null,
         requestedAgentId: run.requestedAgentId || null,
         requestedAgentNameSnapshot: run.requestedAgentNameSnapshot || null,
@@ -328,10 +398,12 @@ export function createSessionsRoute(engine, hub = null) {
     const map = new Map();
     return async (sessionPath) => {
       if (!sessionPath) return null;
-      if (!map.has(sessionPath)) {
-        map.set(sessionPath, loadLatestAssistantSummaryFromSessionFile(sessionPath));
+      const { cacheKey, readPath } = resolveSessionCacheLocator(sessionPath);
+      if (!cacheKey || !readPath) return null;
+      if (!map.has(cacheKey)) {
+        map.set(cacheKey, loadLatestAssistantSummaryFromSessionFile(readPath));
       }
-      return await map.get(sessionPath);
+      return await map.get(cacheKey);
     };
   }
 
@@ -343,7 +415,8 @@ export function createSessionsRoute(engine, hub = null) {
     const summaryManager = agent?.summaryManager || null;
     if (!summaryManager || typeof summaryManager.getSummary !== "function") return null;
 
-    const sessionId = sessionIdFromFilename(path.basename(sessionPath));
+    const sessionId = engine.getSessionIdForPath?.(sessionPath)
+      || sessionIdFromFilename(path.basename(sessionPath));
     const record = summaryManager.getSummary(sessionId);
     return record?.summary?.trim() ? record : null;
   }
@@ -385,9 +458,23 @@ export function createSessionsRoute(engine, hub = null) {
     return [...new Set((paths || []).filter((p) => typeof p === "string" && p.trim()))];
   }
 
-  async function cleanupSessionLifecycle(sessionPaths, reason) {
+  function lifecycleSessionRef(sessionPath) {
+    if (!sessionPath) return sessionPath;
+    try {
+      const sessionId = engine.getSessionIdForPath?.(sessionPath);
+      if (typeof sessionId === "string" && sessionId.trim()) {
+        return { sessionId: sessionId.trim(), sessionPath };
+      }
+    } catch {
+      // Keep path-only cleanup for legacy sessions when manifest lookup fails.
+    }
+    return sessionPath;
+  }
+
+  async function cleanupSessionLifecycle(sessionPaths, reason, options: { skipMemory?: boolean } = {}) {
     const bm = BrowserManager.instance();
     for (const sessionPath of uniqueLifecyclePaths(sessionPaths)) {
+      const sessionRef = lifecycleSessionRef(sessionPath);
       try {
         engine.taskRegistry?.abortByParentSession?.(sessionPath, reason);
       } catch (err) {
@@ -404,24 +491,28 @@ export function createSessionsRoute(engine, hub = null) {
         lifecycleLog.warn(`subagent thread cleanup failed for ${sessionPath}: ${err.message}`);
       }
       try {
-        // 右侧 workflow 卡活动随对话退场（内存 + 持久化背书一并清，按 sessionPath 归属）。
-        engine.activityHub?.clearBySession?.(sessionPath);
+        // 右侧 workflow 卡活动随对话退场（内存 + 持久化背书一并清，按 sessionId 归属）。
+        engine.activityHub?.clearBySession?.(sessionRef);
       } catch (err) {
         lifecycleLog.warn(`activity hub cleanup failed for ${sessionPath}: ${err.message}`);
       }
       try {
-        engine.deferredResults?.suppressBySession?.(sessionPath, reason);
+        engine.deferredResults?.suppressBySession?.(sessionRef, reason);
       } catch (err) {
         lifecycleLog.warn(`deferred cleanup failed for ${sessionPath}: ${err.message}`);
       }
       try {
-        engine.confirmStore?.abortBySession?.(sessionPath);
+        engine.confirmStore?.abortBySession?.(sessionRef);
       } catch (err) {
         lifecycleLog.warn(`confirm cleanup failed for ${sessionPath}: ${err.message}`);
       }
       try {
         if (typeof engine.discardSessionRuntime === "function") {
-          await engine.discardSessionRuntime(sessionPath, reason);
+          if (options && Object.keys(options).length > 0) {
+            await engine.discardSessionRuntime(sessionPath, reason, options);
+          } else {
+            await engine.discardSessionRuntime(sessionPath, reason);
+          }
         } else {
           await engine.abortSessionByPath?.(sessionPath);
         }
@@ -519,6 +610,7 @@ export function createSessionsRoute(engine, hub = null) {
         const summaryRecord = getSessionSummaryRecord(s.path, s.agentId || null);
         return ({
           path: s.path,
+          sessionId: s.sessionId || engine.getSessionIdForPath?.(s.path) || null,
           title: s.title || null,
           firstMessage: (s.firstMessage || "").slice(0, 100),
           modified: s.modified?.toISOString() || null,
@@ -588,6 +680,7 @@ export function createSessionsRoute(engine, hub = null) {
       const sessions = await engine.listSessions();
       const results = searchSessions(sessions, trimmedQuery, { phase, limit }).map((s) => ({
         path: s.path,
+        sessionId: s.sessionId || engine.getSessionIdForPath?.(s.path) || null,
         title: s.title || null,
         firstMessage: (s.firstMessage || "").slice(0, 100),
         modified: s.modified?.toISOString?.() || s.modified || null,
@@ -649,9 +742,17 @@ export function createSessionsRoute(engine, hub = null) {
     try {
       const requestContext = createRequestContext(c, engine);
       const body = await safeJson(c);
-      const { path: sessionPath, pinned } = body;
+      const { sessionId, path: legacySessionPath, pinned } = body;
+      let sessionPath = typeof legacySessionPath === "string" ? legacySessionPath : null;
+      if (typeof sessionId === "string" && sessionId.trim()) {
+        const manifest = engine.getSessionManifest?.(sessionId.trim()) || null;
+        if (!manifest?.currentLocator?.path) {
+          return c.json({ error: "Session manifest not found", code: "session_manifest_not_found" }, 404);
+        }
+        sessionPath = manifest.currentLocator.path;
+      }
       if (!sessionPath) {
-        return c.json({ error: t("error.missingParam", { param: "path" }) }, 400);
+        return c.json({ error: t("error.missingParam", { param: "sessionId" }) }, 400);
       }
       if (typeof pinned !== "boolean") {
         return c.json({ error: t("error.missingParam", { param: "pinned" }) }, 400);
@@ -668,8 +769,11 @@ export function createSessionsRoute(engine, hub = null) {
         sessionPath,
       });
       if (!auth.allowed) return c.json({ error: "insufficient_scope", reason: auth.reason }, 403);
-      const pinnedAt = await engine.setSessionPinned(sessionPath, pinned);
-      return c.json({ ok: true, pinnedAt });
+      const pinnedAt = await engine.setSessionPinned({
+        ...(sessionId ? { sessionId } : {}),
+        sessionPath,
+      }, pinned);
+      return c.json({ ok: true, pinnedAt, sessionId: sessionId || engine.getSessionIdForPath?.(sessionPath) || null });
     } catch (err) {
       return c.json({ error: err.message, code: err.code || undefined }, err.status || 500);
     }
@@ -759,7 +863,15 @@ export function createSessionsRoute(engine, hub = null) {
   route.get("/sessions/messages", async (c) => {
     try {
       const requestContext = createRequestContext(c, engine);
-      const queryPath = c.req.query("path") || null;
+      const querySessionId = c.req.query("sessionId") || null;
+      let queryPath = c.req.query("path") || null;
+      if (typeof querySessionId === "string" && querySessionId.trim()) {
+        const manifest = engine.getSessionManifest?.(querySessionId.trim()) || null;
+        if (!manifest?.currentLocator?.path) {
+          return c.json({ error: "Session manifest not found", code: "session_manifest_not_found" }, 404);
+        }
+        queryPath = manifest.currentLocator.path;
+      }
       if (queryPath && !isValidSessionPath(queryPath, engine.agentsDir)) {
         return c.json({ error: "Invalid session path" }, 403);
       }
@@ -920,10 +1032,19 @@ export function createSessionsRoute(engine, hub = null) {
           const run = runStore?.query?.(b.taskId) || null;
           const runTask = taskFromSubagentRun(run);
           const metadataTask = mergeSubagentTaskMetadata(runTask, task);
+          const durableSessionId = run?.childSessionId || null;
           const durableSessionPath = run?.childSessionPath || null;
+          const deferredSessionId = task?.meta?.sessionId || null;
           const deferredSessionPath = task?.meta?.sessionPath || null;
+          if (!b.sessionId && durableSessionId) b.sessionId = durableSessionId;
+          if (!b.sessionId && deferredSessionId) b.sessionId = deferredSessionId;
           if (!b.streamKey && durableSessionPath) b.streamKey = durableSessionPath;
           if (!b.streamKey && deferredSessionPath) b.streamKey = deferredSessionPath;
+          {
+            const sessionRef = resolveSubagentBlockSession(b, metadataTask, run);
+            if (sessionRef.sessionId && !b.sessionId) b.sessionId = sessionRef.sessionId;
+            if (sessionRef.sessionPath) b.streamKey = sessionRef.sessionPath;
+          }
           patchBlockRequestedMetadata(b, metadataTask);
           patchBlockExecutorMetadata(b, metadataTask, readSessionMeta);
           applySubagentIdentity(b, metadataTask, readSessionMeta);
@@ -1213,9 +1334,9 @@ export function createSessionsRoute(engine, hub = null) {
         createOptions.workspaceMountId = workspaceSelection.mount.mountId;
         createOptions.workspaceLabel = workspaceSelection.mount.label || null;
       }
-      let newSessionPath, newAgentId;
+      let newSessionPath, newSessionId, newAgentId;
       if (agentId && agentId !== (body.currentAgentId || engine.currentAgentId)) {
-        ({ sessionPath: newSessionPath, agentId: newAgentId } = await engine.createSessionForAgent(
+        ({ sessionPath: newSessionPath, sessionId: newSessionId, agentId: newAgentId } = await engine.createSessionForAgent(
           agentId,
           cwd || undefined,
           memFlag,
@@ -1223,7 +1344,7 @@ export function createSessionsRoute(engine, hub = null) {
           createOptions,
         ));
       } else {
-        ({ sessionPath: newSessionPath, agentId: newAgentId } = await engine.createSession(
+        ({ sessionPath: newSessionPath, sessionId: newSessionId, agentId: newAgentId } = await engine.createSession(
           null,
           cwd || undefined,
           memFlag,
@@ -1246,6 +1367,7 @@ export function createSessionsRoute(engine, hub = null) {
       const response = {
         ok: true,
         path: newSessionPath,
+        sessionId: newSessionId || engine.getSessionIdForPath?.(newSessionPath) || null,
         cwd: engine.cwd,
         workspaceFolders: engine.getSessionWorkspaceFolders?.(newSessionPath) || [],
         authorizedFolders: engine.getSessionAuthorizedFolders?.(newSessionPath) || [],
@@ -1265,7 +1387,8 @@ export function createSessionsRoute(engine, hub = null) {
       }, newSessionPath);
       return c.json(response);
     } catch (err) {
-      return c.json({ error: err.message }, 500);
+      const classified = classifySessionCreationError(err);
+      return c.json(classified.body, classified.status);
     }
   });
 
@@ -1393,6 +1516,7 @@ export function createSessionsRoute(engine, hub = null) {
         thinkingLevel: normalizeSessionThinkingLevel(engine.getSessionThinkingLevel?.(newSessionPath) || engine.getThinkingLevel?.()),
         memoryModelUnavailableReason: engine.memoryModelUnavailableReason || null,
         compacted: result.compacted === true,
+        compactionError: result.compactionError || null,
       };
       hub?.eventBus?.emit?.({
         type: "session_created",
@@ -1408,9 +1532,17 @@ export function createSessionsRoute(engine, hub = null) {
   route.post("/sessions/switch", async (c) => {
     try {
       const body = await safeJson(c);
-      const { path: sessionPath, currentSessionPath: oldSessionPath } = body;
+      const { sessionId, path: legacySessionPath, currentSessionPath: oldSessionPath } = body;
+      let sessionPath = typeof legacySessionPath === "string" ? legacySessionPath : null;
+      if (typeof sessionId === "string" && sessionId.trim()) {
+        const manifest = engine.getSessionManifest?.(sessionId.trim()) || null;
+        if (!manifest?.currentLocator?.path) {
+          return c.json({ error: "Session manifest not found", code: "session_manifest_not_found" }, 404);
+        }
+        sessionPath = manifest.currentLocator.path;
+      }
       if (!sessionPath) {
-        return c.json({ error: t("error.missingParam", { param: "path" }) }, 400);
+        return c.json({ error: t("error.missingParam", { param: "sessionId" }) }, 400);
       }
       // 运行路径只允许 active desktop session。归档会话必须先 restore。
       if (!isActiveDesktopSessionPath(sessionPath, engine.agentsDir)) {
@@ -1477,6 +1609,8 @@ export function createSessionsRoute(engine, hub = null) {
         currentModelAudioTransportSupported: modelSupportsDirectAudioInput(activeModel),
         currentModelReasoning: activeModel?.reasoning ?? null,
         currentModelXhigh: modelSupportsXhigh(activeModel),
+        currentModelThinkingLevels: activeModel ? getModelThinkingLevels(activeModel) : null,
+        currentModelDefaultThinkingLevel: activeModel ? resolveModelDefaultThinkingLevel(activeModel) : null,
         currentModelContextWindow: activeModel?.contextWindow ?? null,
         // #1624：restore 时算好的工具/prompt 漂移提示（无漂移或已 dismiss → null）
         capabilityDrift: engine.getSessionCapabilityDriftNotice?.(sessionPath) || null,
@@ -1664,7 +1798,7 @@ export function createSessionsRoute(engine, hub = null) {
       if (await pathExists(sessionFileSidecarPath(destPath))) {
         return c.json({ error: "Stage file sidecar destination already exists" }, 409);
       }
-      await cleanupSessionLifecycle([sessionPath, destPath], "parent session archived");
+      await cleanupSessionLifecycle([sessionPath, destPath], "parent session archived", { skipMemory: true });
 
       // 再从 engine 的 session map 中移除。
       await engine.setSessionPinned(sessionPath, false);
@@ -1780,6 +1914,7 @@ function patchSessionFileLifecycleBlocks(blocks, engine, sessionPath) {
         const filePath = browserScreenshotPath(engine.hanakoHome, sessionPath, {
           base64: block.base64,
           mimeType: block.mimeType,
+          sessionId: engine.getSessionIdForPath?.(sessionPath) || null,
         });
         file = engine.getSessionFileByPath(filePath, { sessionPath });
         if (file) block.type = "file";

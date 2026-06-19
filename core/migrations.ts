@@ -42,6 +42,8 @@ import { patchAutomationJobForMigration } from "../lib/desk/automation-normalize
 import { parseSkillMetadata } from "../lib/skills/skill-metadata.ts";
 import { safeConversationStem } from "../lib/conversations/agent-phone-projection.ts";
 import { DEFAULT_DISABLED_TOOL_NAMES } from "../shared/tool-categories.ts";
+import { ProviderCatalogStore } from "./provider-catalog.ts";
+import { sessionIdFromFilename } from "../lib/session-jsonl.ts";
 
 const moduleLog = createModuleLogger("migrations");
 
@@ -133,6 +135,8 @@ const migrations = {
   40: migrateSessionPermissionModeSidecars,
   // identity 首启种子曾把 {{userName}} 写成空串，修回动态用户名占位符
   41: migrateIdentityUserNamePlaceholders,
+  // Provider Catalog v2：provider/model/capability canonical store 一次性 cutover
+  42: migrateProviderCatalogV2Cutover,
 };
 
 // ── Runner ──────────────────────────────────────────────────────────────────
@@ -283,7 +287,7 @@ function cleanDanglingProviderRefs(ctx) {
  * preferences.json 中的 bridge.telegram / feishu / qq / wechat / whatsapp
  * 各自可能带 agentId 字段指定归属 agent。迁移后每个 platform config
  * 写入对应 agent 的 config.yaml，owner 信息一并合入。
- * bridge.permissionMode / readOnly / receiptEnabled 保留为全局偏好。
+ * bridge.permissionMode / readOnly / receiptEnabled / richStreamingEnabled 保留为全局偏好。
  */
 function migrateBridgeToPerAgent(ctx) {
   const { agentsDir, prefs, log } = ctx;
@@ -300,6 +304,7 @@ function migrateBridgeToPerAgent(ctx) {
     ? explicitPermissionMode === SESSION_PERMISSION_MODES.READ_ONLY
     : bridge.readOnly === true;
   const receiptEnabled = bridge.receiptEnabled === false ? false : undefined;
+  const richStreamingEnabled = bridge.richStreamingEnabled === false ? false : undefined;
 
   const PLATFORMS = ["telegram", "feishu", "qq", "wechat", "whatsapp"];
   const agentConfigs = new Map(); // agentId → { platform: config }
@@ -378,6 +383,7 @@ function migrateBridgeToPerAgent(ctx) {
   }
   if (readOnly) nextBridgePrefs.readOnly = true;
   if (receiptEnabled === false) nextBridgePrefs.receiptEnabled = false;
+  if (richStreamingEnabled === false) nextBridgePrefs.richStreamingEnabled = false;
   if (Object.keys(nextBridgePrefs).length > 0) preferences.bridge = nextBridgePrefs;
   else delete preferences.bridge;
   prefs.savePreferences(preferences);
@@ -1326,6 +1332,18 @@ function patchCronJobsFileForAutomation(jobsPath, log) {
   return { changed: true, patchedJobs };
 }
 
+function migrateProviderCatalogV2Cutover(ctx) {
+  const { hanakoHome, providerRegistry, log } = ctx;
+  const store = providerRegistry?._catalog || new ProviderCatalogStore(hanakoHome);
+  const catalog = store.cutoverFromLegacy();
+  if (providerRegistry) {
+    providerRegistry._addedModelsCache = null;
+    providerRegistry._addedModelsMtime = 0;
+    providerRegistry._entries?.clear?.();
+  }
+  log?.(`[migrations] #42: provider catalog v2 ready (${Object.keys(catalog.providers || {}).length} providers)`);
+}
+
 function migrateDirectNotifyAutomationsToAgentRuns(ctx) {
   const { hanakoHome, agentsDir, log } = ctx;
   const paths = [];
@@ -1903,6 +1921,7 @@ function backfillLegacySessionFiles(ctx) {
   let skipped = 0;
 
   for (const sessionPath of sessionPaths) {
+    const sessionId = sessionIdFromFilename(path.basename(sessionPath));
     let lines;
     try {
       lines = fs.readFileSync(sessionPath, "utf-8").split("\n").filter(Boolean);
@@ -1924,7 +1943,7 @@ function backfillLegacySessionFiles(ctx) {
       if (entry?.type !== "message" || msg?.role !== "toolResult") continue;
 
       for (const ref of legacySessionFileRefs(msg)) {
-        const ok = registerLegacySessionFile({ registry, sessionPath, ref, hanakoHome, log });
+        const ok = registerLegacySessionFile({ registry, sessionId, sessionPath, ref, hanakoHome, log });
         if (ok) registered++;
         else skipped++;
       }
@@ -1934,6 +1953,7 @@ function backfillLegacySessionFiles(ctx) {
         try {
           persistBrowserScreenshotFileSync({
             hanakoHome,
+            sessionId,
             sessionPath,
             base64: screenshot.base64,
             mimeType: screenshot.mimeType || "image/png",
@@ -2924,12 +2944,13 @@ function pushLegacyFileRef(refs, candidate, defaults: any = {}) {
   });
 }
 
-function registerLegacySessionFile({ registry, sessionPath, ref, hanakoHome, log }) {
+function registerLegacySessionFile({ registry, sessionId = null, sessionPath, ref, hanakoHome, log }) {
   if (!ref?.filePath || !path.isAbsolute(ref.filePath)) return false;
   if (!fs.existsSync(ref.filePath)) return false;
 
   try {
     registry.registerFile({
+      ...(sessionId ? { sessionId } : {}),
       sessionPath,
       filePath: ref.filePath,
       label: ref.label || path.basename(ref.filePath),

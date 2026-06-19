@@ -52,6 +52,7 @@ import { serializeSessionFile } from "../session-files/session-file-response.ts"
  * @param {() => boolean} [opts.getSandboxNetworkEnabled]  动态沙盒联网开关（仅沙盒开启时生效）
  * @param {() => string[]} [opts.getExternalReadPaths]  当前 session 用户显式给过的外部只读路径
  * @param {() => string|null} [opts.getSessionPath]  当前工具调用归属的 sessionPath
+ * @param {(sessionPath: string) => string|null} [opts.getSessionIdForPath]  sessionPath locator → sessionId
  * @param {(fileId: string, options?: {sessionPath?: string|null}) => object|null} [opts.resolveSessionFile]  SessionFile resolver
  * @param {(entry: object) => void} [opts.recordFileOperation]  记录 write/edit 触达的 session file
  * @param {() => object|null} [opts.getVisionBridge]  辅助视觉桥
@@ -70,6 +71,7 @@ export function createSandboxedTools(cwd, customTools, {
   getSandboxNetworkEnabled,
   getExternalReadPaths,
   getSessionPath,
+  getSessionIdForPath,
   resolveSessionFile,
   recordFileOperation,
   getVisionBridge,
@@ -136,11 +138,13 @@ export function createSandboxedTools(cwd, customTools, {
   const readTool = wrapSessionFilePathTool(wrapReadImageWithVisionBridge(wrapReadOfficeMedia(createReadTool(cwd, { operations: readOps }), cwd, {
     hanakoHome,
     getSessionPath,
+    getSessionIdForPath,
     recordFileOperation,
     getVisionBridge,
     isVisionAuxiliaryEnabled,
   }), cwd, {
     getSessionPath,
+    getSessionIdForPath,
     recordFileOperation,
     getVisionBridge,
     isVisionAuxiliaryEnabled,
@@ -219,6 +223,20 @@ function resolveToolPath(rawPath, cwd) {
   return path.isAbsolute(rawPath) ? rawPath : path.resolve(cwd, rawPath);
 }
 
+function fileTouchToolPathParam(params) {
+  if (!params || typeof params !== "object") return null;
+  if (typeof params.path === "string" && params.path) return params.path;
+  if (typeof params.file_path === "string" && params.file_path) return params.file_path;
+  if (typeof params.filePath === "string" && params.filePath) return params.filePath;
+  return null;
+}
+
+function normalizeFileTouchToolParams(params) {
+  const rawPath = fileTouchToolPathParam(params);
+  if (!rawPath || params?.path === rawPath) return params;
+  return { ...params, path: rawPath };
+}
+
 function wrapFileTouchTool(tool, cwd, {
   origin,
   operationForPath,
@@ -228,9 +246,10 @@ function wrapFileTouchTool(tool, cwd, {
   return {
     ...tool,
     execute: async (toolCallId, params, ...rest) => {
-      const absolutePath = resolveToolPath(params?.path, cwd);
+      const normalizedParams = normalizeFileTouchToolParams(params);
+      const absolutePath = resolveToolPath(fileTouchToolPathParam(normalizedParams), cwd);
       const operation = absolutePath ? operationForPath?.(absolutePath) : null;
-      const result = await tool.execute(toolCallId, params, ...rest);
+      const result = await tool.execute(toolCallId, normalizedParams, ...rest);
       const sessionPath = getSessionPath?.() || null;
       if (!absolutePath || !sessionPath || typeof recordFileOperation !== "function") {
         return result;

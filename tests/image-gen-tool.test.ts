@@ -80,6 +80,143 @@ describe("generate-image tool — metadata", () => {
     expect(description).toBeTruthy();
     expect(parameters.required).toContain("prompt");
   });
+
+  it("exposes a stable options object for provider-specific image parameters", () => {
+    expect(parameters.properties.options).toMatchObject({
+      type: "object",
+    });
+  });
+
+  it("exposes image mode as an advanced override, not as the default generation path", () => {
+    expect(parameters.properties.mode).toMatchObject({
+      type: "string",
+    });
+    expect(parameters.properties.mode.description).toMatch(/默认|省略|default|omit/i);
+  });
+});
+
+describe("generate-video tool — metadata", () => {
+  it("exposes a stable options object for provider-specific video parameters", async () => {
+    const mod = await import("../plugins/image-gen/tools/generate-video.ts");
+    expect(mod.parameters.required).toContain("prompt");
+    expect(mod.parameters.properties.options).toMatchObject({
+      type: "object",
+    });
+  });
+
+  it("delegates video generation to the universal media bus instead of the legacy adapter path", async () => {
+    const mod = await import("../plugins/image-gen/tools/generate-video.ts");
+    const legacyMediaGen = makeMediaGen();
+    const request = vi.fn(async () => ({
+      ok: true,
+      kind: "video",
+      batchId: "batch-video",
+      prompt: "a moonlit room",
+      delivery: { mode: "session" },
+      tasks: [{ taskId: "task-video" }],
+    }));
+
+    const result = await mod.execute({
+      prompt: "a moonlit room",
+      provider: "agnes",
+      model: "video-model",
+      duration: 5,
+      ratio: "16:9",
+      options: { camera: "slow pan" },
+    }, makeCtx(legacyMediaGen, { request }));
+
+    expect(request).toHaveBeenCalledWith("media:generate-video", {
+      sessionPath: "/sessions/test.jsonl",
+      input: {
+        prompt: "a moonlit room",
+        duration: 5,
+        ratio: "16:9",
+        model: "video-model",
+        provider: "agnes",
+        options: { camera: "slow pan" },
+      },
+    });
+    expect(legacyMediaGen.registry.get).not.toHaveBeenCalled();
+    expect(legacyMediaGen.registry.getByType).not.toHaveBeenCalled();
+    expect(legacyMediaGen.store.add).not.toHaveBeenCalled();
+    expect(legacyMediaGen.poller.add).not.toHaveBeenCalled();
+    expect(result.details.mediaGeneration).toMatchObject({
+      kind: "video",
+      batchId: "batch-video",
+      prompt: "a moonlit room",
+      tasks: [{ taskId: "task-video" }],
+    });
+  });
+
+  it("passes sessionId-first ownership to the universal video media bus", async () => {
+    const mod = await import("../plugins/image-gen/tools/generate-video.ts");
+    const request = vi.fn(async () => ({
+      ok: true,
+      kind: "video",
+      batchId: "batch-video",
+      prompt: "a moonlit room",
+      delivery: { mode: "session" },
+      tasks: [{ taskId: "task-video" }],
+    }));
+    const ctx = {
+      ...makeCtx(makeMediaGen(), { request }),
+      sessionId: "sess_video_tool",
+      sessionRef: {
+        sessionId: "sess_video_tool",
+        sessionPath: "/sessions/test.jsonl",
+      },
+    };
+
+    await mod.execute({ prompt: "a moonlit room" }, ctx);
+
+    expect(request).toHaveBeenCalledWith("media:generate-video", expect.objectContaining({
+      sessionId: "sess_video_tool",
+      sessionPath: "/sessions/test.jsonl",
+      sessionRef: {
+        sessionId: "sess_video_tool",
+        sessionPath: "/sessions/test.jsonl",
+      },
+    }));
+  });
+});
+
+describe("describe-media-options tool", () => {
+  it("returns provider-contributed mode parameter schema without submitting generation", async () => {
+    const mod = await import("../plugins/image-gen/tools/describe-media-options.ts");
+    const request = vi.fn(async () => ({
+      providers: {
+        "jimeng-cli": {
+          providerId: "jimeng-cli",
+          displayName: "即梦 CLI",
+          models: [{
+            id: "seedance2.0_vip",
+            displayName: "Seedance 2.0 VIP",
+            modes: [{
+              id: "text2video",
+              parameterSchema: {
+                type: "object",
+                properties: {
+                  video_resolution: { type: "string", enum: ["720p", "1080p"] },
+                },
+              },
+              defaults: { video_resolution: "720p" },
+            }],
+          }],
+        },
+      },
+    }));
+
+    const result = await mod.execute({
+      kind: "video",
+      provider: "jimeng-cli",
+      model: "seedance2.0_vip",
+      mode: "text2video",
+    }, { bus: { request } });
+
+    expect(request).toHaveBeenCalledWith("provider:media-providers", { capability: "video_generation" });
+    const mediaOptions = result.details.mediaOptions as any;
+    expect(mediaOptions.mode.parameterSchema.properties.video_resolution.enum).toEqual(["720p", "1080p"]);
+  });
 });
 
 describe("generate-image tool — initialization guard", () => {
@@ -163,6 +300,20 @@ describe("generate-image tool — adapter resolution", () => {
     expect(result.content[0].text).toContain('指定的图片生成 provider "minimax" 不可用');
     expect(requestedAdapter.submit).not.toHaveBeenCalled();
     expect(defaultAdapter.submit).not.toHaveBeenCalled();
+    expect(store.add).not.toHaveBeenCalled();
+  });
+
+  it("rejects image mode ids passed as model ids with guidance back to the default path", async () => {
+    const { registry, store, poller, adapter } = makeMediaGen({
+      submit: vi.fn(async () => ({ taskId: "task-openai" })),
+    });
+    const ctx = makeCtx({ registry, store, poller });
+
+    const result = await execute({ prompt: "a cat", provider: "gemini", model: "image2image" }, ctx);
+
+    expect(result.content[0].text).toContain('"image2image" 是 mode，不是 model');
+    expect(result.content[0].text).toContain("默认生成请省略 model");
+    expect(adapter.submit).not.toHaveBeenCalled();
     expect(store.add).not.toHaveBeenCalled();
   });
 
@@ -496,6 +647,48 @@ describe("generate-image tool — single submit returns media placeholder metada
     expect(call.prompt).toBe("mountains");
     expect(call.adapterTaskId).toBeNull();
     expect(call.submitState).toBe("submitting");
+  });
+
+  it("records sessionId-first ownership in store and background bus requests", async () => {
+    const { registry, store, poller } = makeMediaGen({
+      submit: vi.fn(async () => ({ taskId: "t-session-id" })),
+    });
+    const busRequest = vi.fn(async () => ({}));
+    const ctx = {
+      ...makeCtx({ registry, store, poller }, { request: busRequest }),
+      sessionId: "sess_image_tool",
+      sessionRef: {
+        sessionId: "sess_image_tool",
+        sessionPath: "/sessions/test.jsonl",
+      },
+    };
+
+    await execute({ prompt: "lantern" }, ctx);
+
+    const taskCall = store.add.mock.calls[0][0];
+    const deferredCall = (busRequest.mock.calls as any).find(([type]: any) => type === "deferred:register");
+    const taskRegisterCall = (busRequest.mock.calls as any).find(([type]: any) => type === "task:register");
+
+    expect(taskCall).toMatchObject({
+      sessionId: "sess_image_tool",
+      sessionPath: "/sessions/test.jsonl",
+      sessionRef: {
+        sessionId: "sess_image_tool",
+        sessionPath: "/sessions/test.jsonl",
+      },
+    });
+    expect(deferredCall![1]).toMatchObject({
+      sessionId: "sess_image_tool",
+      sessionPath: "/sessions/test.jsonl",
+      sessionRef: {
+        sessionId: "sess_image_tool",
+        sessionPath: "/sessions/test.jsonl",
+      },
+    });
+    expect(taskRegisterCall![1]).toMatchObject({
+      sessionId: "sess_image_tool",
+      parentSessionPath: "/sessions/test.jsonl",
+    });
   });
 
   it("registers task with deferred:register", async () => {

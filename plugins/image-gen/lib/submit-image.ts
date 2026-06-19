@@ -5,12 +5,13 @@ import {
   createTaskId,
   imageDeferredMeta,
   isResponseDelivery,
-  normalizeSessionPath,
+  normalizeSessionRef,
   normalizeMediaDelivery,
   assertAdapterReferenceImageLimit,
   resolveImageTarget,
   runSubmitInBackground,
 } from "./image-task-runner.ts";
+import { resolveMediaParameters } from "../../../core/media/media-parameters.ts";
 import { t } from "../../../lib/i18n.ts";
 
 function assertMediaRuntime(ctx) {
@@ -23,10 +24,11 @@ function assertMediaRuntime(ctx) {
 
 export async function submitImageGeneration({ input = {}, ctx, metadata = null, deliveryTarget = undefined }: any = {}) {
   const { registry, store, poller } = assertMediaRuntime(ctx);
-  const sessionPath = normalizeSessionPath(ctx);
+  const sessionTarget = normalizeSessionRef(ctx);
+  const { sessionId, sessionPath, sessionRef } = sessionTarget;
   const delivery = normalizeMediaDelivery(input);
   const responseDelivery = isResponseDelivery(delivery);
-  if (!sessionPath && !responseDelivery) {
+  if (!sessionId && !sessionPath && !responseDelivery) {
     throw new Error(t("plugin.imageGen.noSessionPath"));
   }
 
@@ -37,8 +39,19 @@ export async function submitImageGeneration({ input = {}, ctx, metadata = null, 
 
   const count = Math.min(Math.max(input.count || 1, 1), 9);
   const batchId = createTaskId();
+  const providerDefaults = submitCtx.config?.get?.("providerDefaults")?.[target.providerId] || {};
+  const parameterResolution = resolveMediaParameters({
+    kind: "image",
+    input,
+    providerId: target.providerId,
+    model: target.model,
+    providerDefaults,
+  });
   const params = {
+    ...parameterResolution.resolvedParameters,
     ...buildImageParams(input),
+    mode: parameterResolution.modeId,
+    resolvedParameters: parameterResolution.resolvedParameters,
     providerId: target.providerId,
     ...(target.modelId ? { modelId: target.modelId, model: target.modelId } : {}),
     ...(target.protocolId ? { protocolId: target.protocolId } : {}),
@@ -69,7 +82,9 @@ export async function submitImageGeneration({ input = {}, ctx, metadata = null, 
       type: "image",
       prompt: input.prompt,
       params,
+      sessionId,
       sessionPath,
+      sessionRef,
       deliveryMode: delivery.mode,
       delivery,
       ...(resolvedDeliveryTarget ? { deliveryTarget: resolvedDeliveryTarget } : {}),
@@ -82,7 +97,9 @@ export async function submitImageGeneration({ input = {}, ctx, metadata = null, 
       try {
         await ctx.bus.request("deferred:register", {
           taskId,
+          sessionId,
           sessionPath,
+          sessionRef,
           meta: deferredMeta,
         });
       } catch (err) {
@@ -93,6 +110,8 @@ export async function submitImageGeneration({ input = {}, ctx, metadata = null, 
         await ctx.bus.request("task:register", {
           taskId,
           type: "media-generation",
+          sessionId,
+          sessionRef,
           parentSessionPath: sessionPath,
           meta: deferredMeta,
         });

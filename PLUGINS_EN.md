@@ -161,7 +161,7 @@ export const description = "...";       // required
 export const parameters = { ... };      // JSON Schema, optional
 export async function execute(input, toolCtx) {  // required
   // input: user-provided parameters
-  // toolCtx: { pluginId, pluginDir, dataDir, sessionPath, bus, config, log, registerSessionFile, stageFile }
+  // toolCtx: { pluginId, pluginDir, dataDir, sessionId, sessionRef, sessionPath, bus, network, config, log, registerSessionFile, stageFile }
   return "result";
 }
 ```
@@ -198,7 +198,8 @@ When a tool needs to deliver files, first stage the local file as a `SessionFile
 import { createMediaDetails } from "@hana/plugin-runtime";
 
 const staged = toolCtx.stageFile({
-  sessionPath: toolCtx.sessionPath,
+  sessionId: toolCtx.sessionId,
+  sessionRef: toolCtx.sessionRef,
   filePath: "/path/to/image.png",
   label: "image.png",
 });
@@ -211,7 +212,7 @@ return {
 
 The framework automatically extracts `details.media` and delivers files according to context: desktop renders file cards, Bridge sends through the target platform, and Mobile PWA / remote frontends read through the same `SessionFile` / Resource identity. The new protocol prefers structured `session_file` entries in `details.media.items`; `mediaUrls` remains only as a compatibility field for old tools and remote URLs. Local files must not bypass `stageFile()` / `stage_files` through `MEDIA:/path`, `file://`, or `mediaUrls`; register them as `session_file` entries first. Do not create private plugin file cards as a substitute for `SessionFile`.
 
-When a plugin produces local files directly, call `toolCtx.stageFile({ sessionPath, filePath, label })` to attach them to the current session and obtain a ready-to-return media item. `registerSessionFile` remains available as a lower-level compatibility API, but new plugins should use `stageFile` so file ownership and media delivery stay coupled. `sessionPath` is explicit and `filePath` must be absolute. Hana records these files as `storageKind: "plugin_data"`, so they are treated as plugin data or generated output and are not removed by the session temporary-cache cleaner. Plugins should not assign temporary-cache lifecycle to arbitrary local paths; that lifecycle belongs to the framework.
+When a plugin produces local files directly, call `toolCtx.stageFile({ sessionId, sessionRef, filePath, label })` to attach them to the current session and obtain a ready-to-return media item. `registerSessionFile` remains available as a lower-level compatibility API, but new plugins should use `stageFile` so file ownership and media delivery stay coupled. `sessionId` / `sessionRef` are the preferred identity fields; `sessionPath` remains only as a legacy compatibility locator. `filePath` must be absolute. Hana records these files as `storageKind: "plugin_data"`, so they are treated as plugin data or generated output and are not removed by the session temporary-cache cleaner. Plugins should not assign temporary-cache lifecycle to arbitrary local paths; that lifecycle belongs to the framework.
 
 Boundaries:
 
@@ -220,6 +221,46 @@ Boundaries:
 - User uploads, Bridge inbound attachments, browser screenshots, and legacy `create_artifact` compatibility outputs are registered by the framework as `managed_cache`
 - Install sources such as `.skill`, plugin folders, or zip files are registered by install routes as `install_source`
 - Cards own interactive presentation; files remain resources. If a card needs a file, reference the `SessionFile` instead of embedding file bytes in the card payload
+
+#### External Data Access
+
+When a plugin needs live scores, weather, prices, external search results, or third-party platform data, new code should use the host-provided `ctx.network.fetch()` helper for outbound HTTP APIs. The iframe page calls only this plugin's own route, such as `hana.api.fetch("api/live-scores")`; the route handler then calls `ctx.network.fetch("https://...")`. This keeps iframe authentication, outbound host declarations, timeouts, caching, and response-size limits inside the host runtime boundary.
+
+`ctx.network.fetch()` requires an explicit `network.fetch` capability plus allowed hosts in the manifest:
+
+```json
+{
+  "trust": "full-access",
+  "capabilities": ["network.fetch"],
+  "network": {
+    "allowedHosts": ["site.api.espn.com"],
+    "methods": ["GET"],
+    "defaultTimeoutMs": 8000,
+    "maxResponseBytes": 1048576
+  }
+}
+```
+
+```js
+// routes/api.js
+route.get("/live-scores", async (c) => {
+  const ctx = c.get("pluginCtx");
+  const res = await ctx.network.fetch(
+    "https://site.api.espn.com/apis/site/v2/sports/soccer/fifa.world/scoreboard",
+    { cacheTtlMs: 30_000 },
+  );
+  return c.json(await res.json());
+});
+```
+
+Boundaries:
+
+- `allowedHosts` contains hostnames; `*.example.com` matches subdomains; an empty list rejects every external host
+- The default method set is `GET`; declare `POST`, `PUT`, or other methods in `network.methods` when needed
+- HTTPS is required by default; `http://127.0.0.1`, `localhost`, and private-network targets require `"allowLocalhost": true`
+- `timeoutMs`, `cacheTtlMs`, and `maxResponseBytes` may override manifest defaults per call
+- API keys, tokens, and cookies must not live in `assets/` or iframe JS; store them through configuration schema and read them on the route side
+- Older plugins that already call Node `fetch()` directly from routes remain compatible; new plugins, templates, and Agent-generated code should use `ctx.network.fetch()` so diagnostics can point to missing capability, host, method, or size declarations
 
 #### Scheduled Automation Actions
 
@@ -278,7 +319,7 @@ export const name = "focus";
 export const description = "Start focus mode";
 export async function execute(args, cmdCtx) {
   // args: user input text
-  // cmdCtx: { sessionPath, agentId, bus, config, log }
+  // cmdCtx: { sessionId, sessionRef, sessionPath, agentId, bus, config, log }
 }
 ```
 
@@ -308,7 +349,8 @@ export default function (app, ctx) {
     const { text } = await c.req.json();
     const result = await ctx.bus.request("session:send", {
       text,
-      sessionPath: "/path/to/session.jsonl",  // required
+      sessionId: ctx.sessionId,
+      sessionRef: ctx.sessionRef,
     });
     return c.json(result);
   });
@@ -337,7 +379,7 @@ export function register(app, ctx) {
 }
 ```
 
-All three patterns are backward-compatible: plugins that don't use ctx need no changes. `ctx.bus` can directly call built-in session operations: `session:create`, `session:get`, `session:update`, `session:send`, `session:abort`, `session:history`, `session:list`, `agent:list`, `agent:profile`, `agent:create`, and `agent:update`. Operations against an existing session must include a `sessionPath` parameter. See the Route Context and Session Bus Handlers sections below for the full API.
+All three patterns are backward-compatible: plugins that don't use ctx need no changes. `ctx.bus` can directly call built-in session operations: `session:create`, `session:get`, `session:update`, `session:send`, `session:abort`, `session:history`, `session:list`, `agent:list`, `agent:profile`, `agent:create`, and `agent:update`. Operations against an existing session must include `sessionId` or `sessionRef`; `sessionPath` remains a legacy compatibility input. See the Route Context and Session Bus Handlers sections below for the full API.
 
 #### Request-level context (pluginRequestContext)
 
@@ -528,9 +570,19 @@ The host appends `hana-theme` and `hana-css` query parameters to the iframe URL.
 <link rel="stylesheet" href="${new URLSearchParams(location.search).get('hana-css')}">
 ```
 
-Static frontend resources belong under the plugin's `assets/` directory and are served by the Hana host at `/api/plugins/{pluginId}/assets/...`. This follows the same boundary idea as VS Code Webview resources: the entry route is opened with the local token or `pluginIframeTicket`; after a successful page response, the host issues a short-lived HttpOnly cookie scoped only to `/api/plugins/{pluginId}/assets/`. Vite split chunks, `React.lazy()` imports, CSS, fonts, images, JSON, wasm, and related static requests should not depend on `?token` or `pluginIframeTicket`.
+Static frontend resources belong under the plugin's `assets/` directory and are served by the Hana host at `/api/plugins/{pluginId}/assets/...`. This follows the same boundary idea as VS Code Webview resources: the entry route is opened with the local token or `pluginIframeTicket`; after a successful page response, the host issues a short-lived HttpOnly cookie scoped only to `/api/plugins/{pluginId}/assets/`. Vite split chunks, `React.lazy()` imports, CSS, fonts, images, JSON, wasm, and browser-playable video files such as MP4/WebM/MOV should not depend on `?token` or `pluginIframeTicket`. Video assets support HTTP byte ranges for `<video>` playback and seeking.
 
-When page scripts call the plugin's own dynamic route APIs (`/api/plugins/{pluginId}/...`), use the surface session credential the host appends to the iframe URL (query parameter `pluginSurfaceSession`) and send it back via the `X-Hana-Plugin-Surface-Session` header (or a query parameter of the same name):
+When page scripts call the plugin's own dynamic route APIs, prefer `hana.api.fetch()` from `@hana/plugin-sdk`. It derives the current plugin id from the iframe route and sends the surface session credential that the host appended to the iframe URL:
+
+```js
+import { hana } from '@hana/plugin-sdk';
+
+const res = await hana.api.fetch('create-session', {
+  method: 'POST',
+});
+```
+
+When converting a website into a plugin, rewrite same-plugin `fetch('/api/...')` calls to `hana.api.fetch(...)` instead of hard-coding `/api/plugins/{pluginId}/...` in browser code. The lower-level protocol is: the host appends the surface session as the `pluginSurfaceSession` query parameter, and page scripts send it back with the `X-Hana-Plugin-Surface-Session` header (or a query parameter of the same name):
 
 ```js
 const surfaceSession = new URLSearchParams(location.search).get('pluginSurfaceSession');
@@ -540,7 +592,7 @@ const res = await fetch('/api/plugins/my-plugin/create-session', {
 });
 ```
 
-This credential only authorizes the plugin's own proxied route paths and carries no host scopes; the host strips it from the request before forwarding to the plugin handler. `pluginIframeTicket` is a one-time document-load credential — do not reuse it for XHR.
+This credential only authorizes the plugin's own proxied route paths and carries no host scopes; the host strips it from the request before forwarding to the plugin handler. `pluginIframeTicket` is a one-time document-load credential. Do not reuse it for XHR or static resource URLs.
 
 Browser code should prefer the SDK helper:
 
@@ -548,6 +600,7 @@ Browser code should prefer the SDK helper:
 import { hana } from '@hana/plugin-sdk';
 
 const iconUrl = hana.assets.url('images/icon.svg');
+const bgVideoUrl = hana.assets.url('videos/background.mp4');
 ```
 
 The server-side shell can also point directly at the same host-served path:
@@ -557,6 +610,8 @@ The server-side shell can also point directly at the same host-served path:
 ```
 
 Treat `assets/` as a public static root. Put only built files and public media there. Do not put source files, secrets, private config, or runtime data in it. The host rejects path traversal, dotfiles, source maps, and non-web static extensions by default. Use plugin route APIs or SDK host requests for dynamic data.
+
+Agent-generated plugins and newly edited plugin UI should not register extra `/api/file`, `/api/video`, `/assets/*`, or similar routes only to serve CSS, JS, images, fonts, or MP4 files. Existing plugins that already use static-file compatibility handlers remain loadable. The documented contract for new work is to put those resources in `assets/` and reference them with `hana.assets.url(...)` or the official host-served assets path in the route shell.
 
 React plugin UIs should use `@hana/plugin-components`. It provides Button, IconButton, TextInput, Textarea, Select, Switch, SettingRow, CardShell, List, EmptyState, and related primitives that match Hana's current controls:
 
@@ -628,6 +683,7 @@ Most plugins don't need a manifest. Only required for:
 - Declaring `trust: "full-access"` for full permissions
 - Declaring iframe UI host capabilities (`ui.hostCapabilities`)
 - Declaring ordinary plugin capabilities (`capabilities`) or future user-granted sensitive capabilities (`sensitiveCapabilities`)
+- Declaring outbound HTTP data boundaries (`network.allowedHosts`, `network.methods`, etc.)
 - Configuration schema (JSON Schema declarations)
 - Plugin metadata (name, version, description for the management UI)
 - Soft dependency declarations
@@ -641,8 +697,14 @@ Most plugins don't need a manifest. Only required for:
   "description": "What this plugin does",
   "trust": "full-access",
   "activationEvents": ["onToolCall:search"],
-  "capabilities": ["session", "agent", "model.sample", "media.generate"],
+  "capabilities": ["session", "agent", "model.sample", "media.generate", "network.fetch"],
   "sensitiveCapabilities": ["filesystem.write"],
+  "network": {
+    "allowedHosts": ["api.example.com"],
+    "methods": ["GET", "POST"],
+    "defaultTimeoutMs": 8000,
+    "maxResponseBytes": 1048576
+  },
   "ui": {
     "hostCapabilities": ["external.open"]
   },
@@ -658,6 +720,8 @@ Most plugins don't need a manifest. Only required for:
 Without a manifest, `id` is derived from the directory name, other fields default to empty, and permission is restricted.
 
 `capabilities` are ordinary declarations and are exposed as `ctx.capabilities`; in the current version, declared ordinary capabilities can be used directly through the SDK or EventBus. `sensitiveCapabilities` records intent for the future user-granted permission system and is exposed as `ctx.sensitiveCapabilities`.
+
+`network` describes the outbound HTTP boundary only; it does not grant a capability by itself. Code that calls `ctx.network.fetch()` must still declare `network.fetch` in `capabilities` or `sensitiveCapabilities`. New plugins should fetch live data, third-party API payloads, search results, and dynamic website-conversion data from route code, then return sanitized JSON to the iframe. `network` is not a static resource serving config; packaged images, videos, CSS, and JS still belong under `assets/`.
 
 ### Activation Events
 
@@ -833,7 +897,7 @@ Plugins should prefer the typed helpers from `@hana/plugin-runtime`. They map to
 | `media:generate-image` | Submit an image generation task through the built-in media task pipeline; completed files are delivered as `SessionFile` records by default, while `delivery.mode="response"` returns task/file results only |
 | `media:generate` / `media:generate-video` / `media:transcribe-audio` | Submit generic media tasks, video generation, or audio transcription through the native Media Manager |
 
-Plugin backend code should prefer the `@hana/plugin-runtime` helpers. Plugin pages or route handlers that already hold host HTTP credentials can also use the native facade: `POST /api/media/generate`, `POST /api/media/image/generate`, `POST /api/media/video/generate`, and `POST /api/media/asr/transcribe`. These endpoints require chat scope. Image/video requests must include `prompt`; the default `delivery.mode="session"` also requires `sessionPath` and registers completed files as `SessionFile` records. For plugin-owned artifacts, pass `delivery: { mode: "response" }` and omit `sessionPath`; poll `GET /api/media/tasks/:taskId`, then fetch `task.files[]` through `GET /api/media/generated/:filename`. ASR requests still require `sessionPath` and `fileId`; image references must use `SessionFile` references such as `{ kind: "session_file", fileId }`. All of them forward into the same Media Manager task pipeline. Image adapters accept multiple reference images by default; adapters that only support one reference should declare `maxReferenceImages: 1`, and the pipeline rejects oversized requests before enqueueing.
+Plugin backend code should prefer the `@hana/plugin-runtime` helpers. Plugin pages or route handlers that already hold host HTTP credentials can also use the native facade: `POST /api/media/generate`, `POST /api/media/image/generate`, `POST /api/media/video/generate`, and `POST /api/media/asr/transcribe`. These endpoints require chat scope. Image/video requests must include `prompt`; the default `delivery.mode="session"` also requires `sessionId` or `sessionRef` and registers completed files as `SessionFile` records. For plugin-owned artifacts, pass `delivery: { mode: "response" }` and omit session identity; poll `GET /api/media/tasks/:taskId`, then fetch `task.files[]` through `GET /api/media/generated/:filename`. ASR requests require `sessionId` or legacy `sessionPath` plus `fileId`; image references must use `SessionFile` references such as `{ kind: "session_file", fileId }`. All of them forward into the same Media Manager task pipeline. Image adapters accept multiple reference images by default; adapters that only support one reference should declare `maxReferenceImages: 1`, and the pipeline rejects oversized requests before enqueueing.
 
 `session:send.context` is injected only into the current provider request. It does not rewrite the visible user message and does not persist as user text. A plugin can run its own RAG, world-state, mood, or character-state system, then attach those snippets when sending:
 
@@ -860,6 +924,7 @@ const session = await createSession(ctx, {
   visibility: "plugin_private",
   cwd: ctx.dataDir,
 });
+const sessionTarget = session.sessionRef ?? { sessionId: session.sessionId };
 
 const query = await sampleText(ctx, {
   operation: "tavern-rag-query",
@@ -867,7 +932,7 @@ const query = await sampleText(ctx, {
   maxTokens: 80,
 });
 
-await sendSessionMessage(ctx, session.sessionPath, {
+await sendSessionMessage(ctx, sessionTarget, {
   text: "I push the door open.",
   context: {
     beforeUser: [
@@ -878,7 +943,8 @@ await sendSessionMessage(ctx, session.sessionPath, {
 });
 
 await generateImage(ctx, {
-  sessionPath: session.sessionPath,
+  sessionId: session.sessionId,
+  sessionRef: session.sessionRef,
   prompt: "A handwritten character card on warm paper",
   referenceImages: [
     { kind: "session_file", fileId: "sf_reference_a" },
@@ -889,7 +955,8 @@ await generateImage(ctx, {
 
 await generateMedia(ctx, {
   kind: "video",
-  sessionPath: session.sessionPath,
+  sessionId: session.sessionId,
+  sessionRef: session.sessionRef,
   prompt: "A slow page-turn animation on warm paper",
 });
 
@@ -900,7 +967,8 @@ const artifactOnly = await generateImage(ctx, {
 // Later poll /api/media/tasks/{artifactOnly.tasks[0].taskId}
 
 const transcription = await transcribeAudio(ctx, {
-  sessionPath: session.sessionPath,
+  sessionId: session.sessionId,
+  sessionRef: session.sessionRef,
   fileId: "session-file-id",
 });
 // transcription = { ok: true, transcription: { status, text, ... } }
@@ -1022,7 +1090,7 @@ If the installed version is newer than the highest compatible marketplace versio
 
 ## Forward Compatibility
 
-The system ignores unrecognized directories and manifest fields. Old plugins always work on new systems; new plugins on old systems simply have new contribution types silently ignored. `manifestVersion` remains optional for compatibility; new iframe UI plugins that declare `ui.hostCapabilities` should use `manifestVersion: 1` to match the host and SDK docs, but old plugins do not need a migration.
+The system ignores unrecognized directories and manifest fields. Old plugins always work on new systems; new plugins on old systems simply have new contribution types silently ignored. `manifestVersion` remains optional for compatibility; new iframe UI plugins that declare `ui.hostCapabilities` should use `manifestVersion: 1` to match the host and SDK docs, but old plugins do not need a migration. Existing plugins that created static-resource compatibility handlers for earlier asset limitations also remain allowed; diagnostics and Agent rules should treat them as cleanup candidates, not load blockers.
 
 ## Error Isolation
 
@@ -1034,24 +1102,25 @@ The system ignores unrecognized directories and manifest fields. Old plugins alw
 
 Hana supports multiple sessions and multiple agents running in parallel. Keep the following in mind when developing plugins:
 
-- All EventBus operations against an existing session (`session:get`, `session:update`, `session:send`, `session:abort`, `session:history`, etc.) must include a `sessionPath` parameter to identify the target session
-- Tools obtain the current session path via `toolCtx.sessionPath`
+- All EventBus operations against an existing session (`session:get`, `session:update`, `session:send`, `session:abort`, `session:history`, etc.) must include `sessionId` or `sessionRef` to identify the target session; `sessionPath` is a legacy compatibility input
+- Tools obtain the current session identity via `toolCtx.sessionId` / `toolCtx.sessionRef`; `toolCtx.sessionPath` is only the current locator
 - Do not use `engine.currentSessionPath` or `engine.currentAgentId` (these are UI focus pointers and do not represent the currently executing session)
 
 ```js
-// Correct: explicitly specify sessionPath and attach per-turn context if needed
+// Correct: explicitly specify sessionId/sessionRef and attach per-turn context if needed
 await bus.request("session:send", {
   text: "Hello",
-  sessionPath: "/path/to/session.jsonl",
+  sessionId: toolCtx.sessionId,
+  sessionRef: toolCtx.sessionRef,
   context: {
     beforeUser: [{ label: "world", text: "The character is in a quiet archive." }],
   },
 });
 
 await bus.request("session:abort", {
-  sessionPath: "/path/to/session.jsonl",
+  sessionId: toolCtx.sessionId,
 });
 
-// Wrong: omitting sessionPath may target the wrong session under concurrency
+// Wrong: omitting session identity cannot target the right session under concurrency
 await bus.request("session:send", { text: "Hello" });
 ```
