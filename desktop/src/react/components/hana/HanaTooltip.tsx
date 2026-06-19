@@ -42,6 +42,8 @@ interface HanaTooltipProps {
   delayDuration?: number;
   /** tooltip 位置 */
   side?: 'top' | 'right' | 'bottom' | 'left';
+  /** 對齊方式 */
+  align?: 'start' | 'center' | 'end';
   className?: string;
   /** 是否停用 tooltip（例如 disabled button） */
   disabled?: boolean;
@@ -56,6 +58,7 @@ export function HanaTooltip({
   children,
   delayDuration = 400,
   side = 'top',
+  align = 'center',
   className,
   disabled = false,
 }: HanaTooltipProps) {
@@ -67,7 +70,7 @@ export function HanaTooltip({
     <TooltipProvider delayDuration={delayDuration}>
       <Tooltip>
         <TooltipTrigger asChild>{children}</TooltipTrigger>
-        <TooltipContent side={side} className={cn(className)}>
+        <TooltipContent side={side} align={align} className={cn(className)}>
           {content}
         </TooltipContent>
       </Tooltip>

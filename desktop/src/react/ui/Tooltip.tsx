@@ -1,4 +1,4 @@
-import {
+import React, {
   useCallback,
   useEffect,
   useId,
@@ -9,6 +9,8 @@ import {
   type ReactNode,
 } from 'react';
 import { createPortal } from 'react-dom';
+import { isUiMigrationEnabled } from '../flags/uiFlags';
+import { HanaTooltip } from '../components/hana';
 import styles from './Tooltip.module.css';
 
 /** 统一的 tooltip 出现延迟(ms)。所有 <Tooltip> 默认走这个值,避免各处出现时间不一致。 */
@@ -105,6 +107,46 @@ export function Tooltip({
   variant = 'compact',
   anchorClassName,
 }: TooltipProps) {
+  if (isUiMigrationEnabled('tooltip')) {
+    if (disabled) {
+      if (typeof children === 'function') {
+        return <>{children({
+          ref: () => {},
+          onMouseEnter: () => {},
+          onMouseLeave: () => {},
+          onFocus: () => {},
+          onBlur: () => {},
+        })}</>;
+      }
+      return <>{children}</>;
+    }
+
+    const resolvedAnchor = typeof children === 'function'
+      ? <span className={anchorClassName}>{children({
+          ref: () => {},
+          onMouseEnter: () => {},
+          onMouseLeave: () => {},
+          onFocus: () => {},
+          onBlur: () => {},
+        })}</span>
+      : children;
+
+    const element = React.isValidElement(resolvedAnchor)
+      ? resolvedAnchor
+      : <span className={anchorClassName}>{resolvedAnchor}</span>;
+
+    return (
+      <HanaTooltip
+        content={content}
+        side={placement}
+        align={align}
+        delayDuration={delayMs}
+      >
+        {element as React.ReactElement}
+      </HanaTooltip>
+    );
+  }
+
   const reactId = useId();
   const tooltipId = id || `hana-tooltip-${reactId}`;
   const anchorRef = useRef<HTMLElement | null>(null);
