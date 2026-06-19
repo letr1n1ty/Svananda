@@ -192,6 +192,19 @@ export function buildSlashCommands(
 ): SlashItem[] {
   const list: SlashItem[] = [
     {
+      name: 'goal',
+      label: '/goal',
+      description: 'Auto-Pilot：自動拆解目標並連續執行，直到任務完成',
+      busyLabel: '',
+      icon: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>',
+      type: 'builtin',
+      // /goal 不執行直接送出，而是補上空格讓使用者繼續輸入目標
+      execute: () => {
+        // 交由外部 InputArea 處理文字補齊
+        throw new Error("insert_text_only:/goal ");
+      },
+    },
+    {
       name: 'diary',
       label: '/diary',
       description: t('slash.diary'),

@@ -1107,8 +1107,10 @@ describe("syncModels", () => {
 
     const registry = createModelRegistry(new (AuthStorage as any)(tmpDir), modelsJsonPath);
     const available = await registry.getAvailable();
-    expect(available).toHaveLength(1);
-    expect(available[0]).toMatchObject({
+    // Pi SDK 升級後 getAvailable() 也包含 built-in models，改用 find 驗證自訂模型的屬性
+    const qwenModel = available.find((m) => m.id === "qwen3-vl-plus" && m.provider === "dashscope");
+    expect(qwenModel, "qwen3-vl-plus model not found in available models").toBeDefined();
+    expect(qwenModel).toMatchObject({
       id: "qwen3-vl-plus",
       provider: "dashscope",
       input: ["text", "image"],

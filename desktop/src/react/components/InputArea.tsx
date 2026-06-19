@@ -10,6 +10,8 @@ import { useEditor, EditorContent } from '@tiptap/react';
 import type { Editor } from '@tiptap/core';
 import { useStore } from '../stores';
 import { selectPreviewItems, selectActiveTabId } from '../stores/preview-slice';
+import { sessionScopedListIncludes, sessionScopedValue } from '../stores/session-slice';
+import { isSessionCompacting } from '../stores/context-slice';
 import { selectSessionFiles } from '../stores/selectors/file-refs';
 import { isImageFile, isVideoFile } from '../utils/format';
 import { isAudioFileName } from '../utils/file-kind';
@@ -29,6 +31,7 @@ import { InputControlBar } from './input/InputControlBar';
 import type { PermissionMode } from './input/PlanModeButton';
 import { SessionConfirmationPrompt } from './input/SessionConfirmationPrompt';
 import { CapabilityDriftNotice } from './input/CapabilityDriftNotice';
+import { QueueList } from './input/QueueList';
 import { serializeEditor } from '../utils/editor-serializer';
 import {
   buildFileMentionItems,
@@ -46,7 +49,7 @@ import {
   getModelAudioInputMode,
   notifyTextModelImageFileOnly,
   notifyTextModelAudioBlocked,
-  notifyTextModelVideoBlocked,
+  notifyTextModelVideoFileOnly,
 } from '../utils/chat-image-send-preflight';
 import { openProviderModelSettings } from '../utils/model-settings-navigation';
 import { shouldShowThinkingControl } from '../utils/model-thinking';
@@ -296,7 +299,7 @@ function InputAreaInner({ surface }: Required<InputAreaProps>) {
   const { t, locale } = useI18n();
 
   // Zustand state
-  const isStreaming = useStore(s => s.streamingSessions.includes(s.currentSessionPath || ''));
+  const isStreaming = useStore(s => sessionScopedListIncludes(s, s.streamingSessions, s.currentSessionPath));
   const connected = useStore(s => s.connected);
   const pendingNewSession = useStore(s => s.pendingNewSession);
   const pendingSessionSwitchPath = useStore(s => s.pendingSessionSwitchPath);
@@ -307,10 +310,10 @@ function InputAreaInner({ surface }: Required<InputAreaProps>) {
     ? s.sessions.find(session => session.path === s.currentSessionPath)
     : null);
   const deletedAgentReadOnly = currentSessionProjection?.agentDeleted === true;
-  const compacting = useStore(s => currentSessionPath ? s.compactingSessions.includes(currentSessionPath) : false);
+  const compacting = useStore(s => isSessionCompacting(s, currentSessionPath));
   const screenshotBusy = useStore(s => s.screenshotTaskCount > 0);
   const screenshotProgress = useStore(s => s.screenshotProgress);
-  const inlineError = useStore(s => s.inlineErrors[s.currentSessionPath || ''] ?? null);
+  const inlineError = useStore(s => s.currentSessionPath ? (sessionScopedValue(s, s.inlineErrors, s.currentSessionPath) ?? null) : null);
   const sessionFiles = useStore(s => (s.currentSessionPath ? selectSessionFiles(s, s.currentSessionPath) : EMPTY_FILE_REFS));
   const attachedFiles = useStore(s => s.attachedFiles);
   const docContextAttached = useStore(s => s.docContextAttached);
@@ -329,15 +332,15 @@ function InputAreaInner({ surface }: Required<InputAreaProps>) {
   const removeToast = useStore(s => s.removeToast);
 
   const globalModelInfo = useMemo(() => models.find(m => m.isCurrent), [models]);
-  const sessionModel = useStore(s => s.currentSessionPath ? s.sessionModelsByPath[s.currentSessionPath] : undefined);
+  const sessionModel = useStore(s => s.currentSessionPath ? sessionScopedValue(s, s.sessionModelsByPath, s.currentSessionPath) : undefined);
   const sessionModelInfo = useMemo(() => {
     if (!sessionModel) return undefined;
     const full = models.find(m => m.id === sessionModel.id && m.provider === sessionModel.provider);
     return full ? { ...full, ...sessionModel } : sessionModel;
   }, [models, sessionModel]);
   // #1624：当前 session 的工具能力漂移提示（服务端 restore 时算好，前端只消费）
-  const capabilityDrift = useStore(s => s.currentSessionPath ? (s.capabilityDriftBySession[s.currentSessionPath] ?? null) : null);
-  const capabilityRefreshing = useStore(s => s.currentSessionPath ? s.capabilityRefreshingSessions.includes(s.currentSessionPath) : false);
+  const capabilityDrift = useStore(s => s.currentSessionPath ? (sessionScopedValue(s, s.capabilityDriftBySession, s.currentSessionPath) ?? null) : null);
+  const capabilityRefreshing = useStore(s => sessionScopedListIncludes(s, s.capabilityRefreshingSessions, s.currentSessionPath));
   const currentModelInfo = sessionModelInfo || globalModelInfo;
   const availableThinkingLevels = useMemo(
     () => getModelThinkingLevels(currentModelInfo),
@@ -351,9 +354,9 @@ function InputAreaInner({ surface }: Required<InputAreaProps>) {
     [currentModelInfo, models],
   );
   const modelSwitching = useStore(s => s.modelSwitching);
-  const currentSessionItems = useStore(s => s.currentSessionPath ? s.chatSessions[s.currentSessionPath]?.items : undefined);
+  const currentSessionItems = useStore(s => s.currentSessionPath ? sessionScopedValue(s, s.chatSessions, s.currentSessionPath)?.items : undefined);
   const storedSessionConfirmation = useStore(s => s.currentSessionPath
-    ? s.pendingSessionConfirmationsByPath[s.currentSessionPath] || null
+    ? sessionScopedValue(s, s.pendingSessionConfirmationsByPath, s.currentSessionPath) || null
     : null);
   const pendingSessionConfirmation = useMemo(() => {
     return findLatestInputSessionConfirmation(currentSessionItems, undefined, true)
@@ -367,7 +370,7 @@ function InputAreaInner({ surface }: Required<InputAreaProps>) {
   const [slashMenuOpen, setSlashMenuOpen] = useState(false);
   const [slashSelected, setSlashSelected] = useState(0);
   const [slashBusy, setSlashBusy] = useState<string | null>(null);
-  const [slashResult, setSlashResult] = useState<{ text: string; type: 'success' | 'error'; deskDir?: string } | null>(null);
+  const [slashResult, setSlashResult] = useState<{ text: string; type: 'success' | 'error'; deskDir?: string; filePath?: string } | null>(null);
   const [visibleSessionConfirmation, setVisibleSessionConfirmation] = useState<SessionConfirmationBlock | null>(null);
   const [sessionConfirmationExiting, setSessionConfirmationExiting] = useState(false);
 
@@ -398,12 +401,60 @@ function InputAreaInner({ surface }: Required<InputAreaProps>) {
   const [audioRecordingStartedAt, setAudioRecordingStartedAt] = useState<number | null>(null);
   const [audioRecordingElapsed, setAudioRecordingElapsed] = useState(0);
   const [audioRecordingError, setAudioRecordingError] = useState<string | null>(null);
+
+  // ── Svananda Queue Mode ──
+  interface QueuedMessage {
+    id: string;
+    displayText: string;   // 純文字摘要，用於顯示
+    textHolder: { val: string };
+    thunk: () => Promise<void>;
+  }
+  // 儲存帶顯示資訊的排隊訊息
+  const messageQueueRef = useRef<QueuedMessage[]>([]);
+  // 供 UI render 的 state（和 ref 保持同步）
+  const [queuedMessages, setQueuedMessages] = useState<QueuedMessage[]>([]);
+  // 正在編輯的 queue item id
+  const [editingQueueId, setEditingQueueId] = useState<string | null>(null);
+  const [editingQueueText, setEditingQueueText] = useState('');
+  // Option/Alt 鍵是否按住
+  const [isOptionHeld, setIsOptionHeld] = useState(false);
+
   const inputLocked = deletedAgentReadOnly || continuingDeletedAgentSession;
 
   useEffect(() => {
     setContinuingDeletedAgentSession(false);
     setDeletedAgentContinueError(null);
   }, [currentSessionPath]);
+
+  // ── Svananda Queue Mode: Option 鍵偵測 ──
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => { if (e.key === 'Alt') setIsOptionHeld(true); };
+    const onKeyUp = (e: KeyboardEvent) => { if (e.key === 'Alt') setIsOptionHeld(false); };
+    window.addEventListener('keydown', onKeyDown);
+    window.addEventListener('keyup', onKeyUp);
+    return () => {
+      window.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('keyup', onKeyUp);
+    };
+  }, []);
+
+  // ── Svananda Queue Mode: 串流結束時自動送出下一則排隊訊息 ──
+  useEffect(() => {
+    if (isStreaming) return;
+    if (messageQueueRef.current.length === 0) return;
+    const item = messageQueueRef.current.shift()!;
+    setQueuedMessages(prev => prev.filter(m => m.id !== item.id));
+    void item.thunk();
+  }, [isStreaming]);
+
+
+  // ── Svananda Queue Mode: 切換 session 時清空 queue ──
+  useEffect(() => {
+    messageQueueRef.current = [];
+    setQueuedMessages([]);
+    setEditingQueueId(null);
+  }, [currentSessionPath]);
+
 
   useEffect(() => {
     if (pendingSessionConfirmation) {
@@ -430,8 +481,8 @@ function InputAreaInner({ surface }: Required<InputAreaProps>) {
   // ── 全局 inline notice（截图等非斜杠命令的轻提示）──
   useEffect(() => {
     const handler = (e: Event) => {
-      const { text, type, deskDir } = (e as CustomEvent).detail;
-      setSlashResult({ text, type, deskDir });
+      const { text, type, deskDir, filePath } = (e as CustomEvent).detail;
+      setSlashResult({ text, type, deskDir, filePath });
       setTimeout(() => setSlashResult(null), 3000);
     };
     window.addEventListener('hana-inline-notice', handler);
@@ -637,7 +688,7 @@ function InputAreaInner({ surface }: Required<InputAreaProps>) {
     const ws = getWebSocket();
     if (!ws || ws.readyState !== WebSocket.OPEN) return false;
     const _s = useStore.getState();
-    if (_s.streamingSessions.includes(_s.currentSessionPath || '')) return false;
+    if (sessionScopedListIncludes(_s, _s.streamingSessions, _s.currentSessionPath)) return false;
     if (_s.pendingSessionSwitchPath) return false;
 
     if (pendingNewSession) {
@@ -1160,7 +1211,8 @@ function InputAreaInner({ surface }: Required<InputAreaProps>) {
   // 切换 session 时恢复草稿
   useEffect(() => {
     if (!editor || !currentSessionPath) return;
-    const draft = useStore.getState().drafts[currentSessionPath] || '';
+    const state = useStore.getState();
+    const draft = sessionScopedValue(state, state.drafts, currentSessionPath) || '';
     const current = editor.getText();
     if (draft !== current) {
       if (!draft) {
@@ -1206,8 +1258,8 @@ function InputAreaInner({ surface }: Required<InputAreaProps>) {
     || editorHasInlineNode(editor, 'fileBadge');
   // capabilityRefreshing / compacting：压缩到 reload 完成之间 session 没有可用
   // runtime，此窗口内发 prompt 会冷建第二个 runtime 与 reload 竞争（#1624 I2）。
-  const canSend = hasContent && connected && !isStreaming && !modelSwitching && !pendingSessionSwitchPath && !inputLocked
-    && !capabilityRefreshing && !compacting;
+  const canSend = hasContent && connected && !modelSwitching && !pendingSessionSwitchPath && !inputLocked
+    && !capabilityRefreshing && !compacting && (!isStreaming || inputText.trim().startsWith('/goal ') || inputText.trim().startsWith('/goal! ') || inputText.trim().startsWith('- '));
 
   const loadVisionAuxiliaryConfig = useCallback(async () => {
     if (surface === 'mobile') {
@@ -1338,7 +1390,19 @@ function InputAreaInner({ surface }: Required<InputAreaProps>) {
     if (inputLocked) return;
     slashDismissedTextRef.current = null;
     if (item.type === 'builtin') {
-      item.execute();
+      try {
+        item.execute();
+      } catch (err: any) {
+        if (err.message && err.message.startsWith("insert_text_only:")) {
+          const textToInsert = err.message.split(":")[1];
+          if (editor) {
+            editor.chain().clearContent().insertContent(textToInsert).focus('end').run();
+            setSlashMenuOpen(false);
+          }
+        } else {
+          throw err;
+        }
+      }
       return;
     }
     if (!editor) return;
@@ -1411,8 +1475,8 @@ function InputAreaInner({ surface }: Required<InputAreaProps>) {
       const guardState = useStore.getState();
       const guardPath = guardState.currentSessionPath;
       if (guardPath && (
-        guardState.capabilityRefreshingSessions.includes(guardPath)
-        || guardState.compactingSessions.includes(guardPath)
+        sessionScopedListIncludes(guardState, guardState.capabilityRefreshingSessions, guardPath)
+        || isSessionCompacting(guardState, guardPath)
       )) return;
     }
     setSending(true);
@@ -1449,13 +1513,14 @@ function InputAreaInner({ surface }: Required<InputAreaProps>) {
         attachments: inputFiles,
         model: currentModelInfo,
       });
-      if (!videoPreflight.ok) {
-        notifyTextModelVideoBlocked({
+      const sendVideosNatively = videoPreflight.ok && videoPreflight.reason === 'native-video';
+      const videosAsFileOnly = !videoPreflight.ok;
+      if (videosAsFileOnly) {
+        notifyTextModelVideoFileOnly({
           t,
           addToast: useStore.getState().addToast,
           openSettings: () => openProviderModelSettings(currentModelInfo?.provider),
         });
-        return;
       }
       const audioPreflight = await evaluateChatAudioSendPreflight({
         attachments: inputFiles,
@@ -1465,7 +1530,7 @@ function InputAreaInner({ surface }: Required<InputAreaProps>) {
       const otherFiles = hasFiles ? inputFiles.filter(f =>
         f.isDirectory || (
           !isImageFile(f.name)
-          && !isVideoFile(f.name)
+          && !(sendVideosNatively && isVideoFile(f.name))
           && !(sendAudiosNatively && isAudioFileName(f.name, f.mimeType))
         )
       ) : [];
@@ -1546,7 +1611,7 @@ function InputAreaInner({ surface }: Required<InputAreaProps>) {
           return;
         }
       }
-      for (const video of videoFiles) {
+      for (const video of sendVideosNatively ? videoFiles : []) {
         try {
           if (video.base64Data && video.mimeType) {
             const mimeType = chatVideoMimeTypeForName(video.name, video.mimeType);
@@ -1665,6 +1730,88 @@ function InputAreaInner({ surface }: Required<InputAreaProps>) {
     await submitEditorMessage('prompt');
   }, [submitEditorMessage]);
 
+  // ── Svananda Queue Mode: 排隊送出 ──
+  const handleQueue = useCallback(() => {
+    if (!editor) return;
+    if (!hasContent) return;
+
+    // 立刻 snapshot 當前 editor JSON 與附件
+    const snapshotJson = editor.getJSON();
+    const snapshotAttached = useStore.getState().attachedFiles.slice();
+    const snapshotQuotes = useStore.getState().quotedSelections.slice();
+    const sessionPathSnap = useStore.getState().currentSessionPath;
+    const ws = getWebSocket();
+
+    if (!sessionPathSnap || !ws) return;
+
+    // 取得純文字摘要（用於 Queue 列表顯示）—— serializeEditor 已在頂部 import
+    const { text: rawDisplayText } = serializeEditor(snapshotJson);
+    const displayText = rawDisplayText.trim() || '(附件)';
+
+    // 清空輸入框（讓使用者可以繼續輸入下一則）
+    editor.chain().clearContent().run();
+    if (currentSessionPath) clearDraft(currentSessionPath);
+    clearAttachedFiles();
+    if (useStore.getState().quotedSelections.length > 0) {
+      useStore.getState().clearQuotedSelections();
+    }
+
+    const itemId = `q_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+    let queueItem: QueuedMessage;
+
+    // 建立 thunk：等到 streaming 結束再執行
+    const thunk = async () => {
+      if (!ws || ws.readyState !== WebSocket.OPEN) return;
+      const { serializeEditor } = await import('../utils/editor-serializer');
+      const { mergeEditorFileRefs } = await import('../utils/file-mention-items');
+      const { text: _rawText, skills, fileRefs } = serializeEditor(snapshotJson);
+      
+      // 使用最新被編輯過的文字，而不是 snapshot 當時的 rawText
+      const text = queueItem.textHolder.val.trim();
+      const inputFiles = mergeEditorFileRefs(snapshotAttached, fileRefs);
+
+      if (!text && inputFiles.length === 0 && snapshotQuotes.length === 0) return;
+
+      let finalText = text;
+      const otherFiles = inputFiles.filter(f => f.isDirectory || (!f.name.match(/\.(png|jpe?g|gif|webp|bmp|svg|mp4|m4v|webm|mov|mkv|mp3|wav|ogg|flac|m4a|weba)$/i)));
+      if (otherFiles.length > 0) {
+        const fileBlock = otherFiles.map(f => {
+          const label = f.fileId ? (f.name || f.path) : f.path;
+          return f.isDirectory ? `[目录] ${label}` : `[附件] ${label}`;
+        }).join('\n');
+        finalText = finalText ? `${finalText}\n\n${fileBlock}` : fileBlock;
+      }
+      if (snapshotQuotes.length > 0) {
+        const { formatQuotedSelectionForPrompt } = await import('../utils/quoted-selection');
+        const quoteStr = snapshotQuotes.map(formatQuotedSelectionForPrompt).join('\n\n');
+        finalText = finalText ? `${finalText}\n\n${quoteStr}` : quoteStr;
+      }
+
+      const wsMsg: Record<string, unknown> = {
+        type: 'prompt',
+        text: finalText,
+        sessionPath: sessionPathSnap,
+        uiContext: (await import('../utils/ui-context')).collectUiContext(useStore.getState()),
+        displayMessage: {
+          text,
+          skills: skills.length > 0 ? skills : undefined,
+          quotedText: snapshotQuotes.length > 0 ? snapshotQuotes.map(q => q.text).join('\n\n') : undefined,
+        },
+      };
+      if (skills.length > 0) wsMsg.skills = skills;
+      ws.send(JSON.stringify(wsMsg));
+    };
+
+    queueItem = {
+      id: itemId,
+      displayText,
+      textHolder: { val: displayText },
+      thunk
+    };
+    messageQueueRef.current.push(queueItem);
+    setQueuedMessages(prev => [...prev, queueItem]);
+  }, [editor, hasContent, currentSessionPath, clearDraft, clearAttachedFiles]);
+
   // ── Steer ──
   const handleSteer = useCallback(async () => {
     await submitEditorMessage('interject');
@@ -1720,7 +1867,17 @@ function InputAreaInner({ surface }: Required<InputAreaProps>) {
     }
     if (e.key === 'Enter' && !e.shiftKey && !isComposing.current && !e.isComposing) {
       e.preventDefault();
-      if (isStreaming && hasContent) handleSteer(); else handleSend();
+      // Svananda Queue Mode:
+      //   streaming + Alt/Option + 有內容 → 插話
+      //   streaming + 有內容           → 排隊
+      //   其他                          → 正常送出
+      if (isStreaming && hasContent && (e as unknown as { altKey?: boolean }).altKey) {
+        handleSteer();
+      } else if (isStreaming && hasContent) {
+        handleQueue();
+      } else {
+        handleSend();
+      }
       return true;
     }
     return false;
@@ -1733,6 +1890,7 @@ function InputAreaInner({ surface }: Required<InputAreaProps>) {
     filteredCommands,
     handleFileMentionSelect,
     handleSend,
+    handleQueue,
     handleSteer,
     handleSlashSelect,
     isStreaming,
@@ -1758,10 +1916,14 @@ function InputAreaInner({ surface }: Required<InputAreaProps>) {
   };
 
   const handleSlashResultClick = useCallback(() => {
+    if (slashResult?.filePath) {
+      window.platform?.openFile?.(slashResult.filePath);
+      return;
+    }
     if (!slashResult?.deskDir) return;
     toggleJianSidebar(true);
     void revealDeskDirectory(slashResult.deskDir);
-  }, [slashResult?.deskDir]);
+  }, [slashResult?.deskDir, slashResult?.filePath]);
 
   const handleContinueDeletedAgentSession = useCallback(async () => {
     const path = currentSessionPath;
@@ -1805,7 +1967,7 @@ function InputAreaInner({ surface }: Required<InputAreaProps>) {
         screenshotProgress={screenshotProgress}
         inlineError={inlineError}
         slashResult={slashResult}
-        onResultClick={slashResult?.deskDir ? handleSlashResultClick : undefined}
+        onResultClick={(slashResult?.filePath || slashResult?.deskDir) ? handleSlashResultClick : undefined}
       />
       <div className={styles['slash-menu-anchor']} ref={slashMenuRef}>
         {slashMenuOpen && filteredCommands.length > 0 && (
@@ -1854,6 +2016,35 @@ function InputAreaInner({ surface }: Required<InputAreaProps>) {
             onCompositionStart={() => { isComposing.current = true; }}
             onCompositionEnd={() => { isComposing.current = false; }}
           >
+            {/* Svananda Queue Mode: 排隊訊息列表（在編輯器上方） */}
+            {queuedMessages.length > 0 && (
+              <QueueList
+                items={queuedMessages}
+                editingId={editingQueueId}
+                editingText={editingQueueText}
+                onEdit={(id, text) => { setEditingQueueId(id); setEditingQueueText(text); }}
+                onEditChange={setEditingQueueText}
+                onEditSave={(id) => {
+                  const trimmed = editingQueueText.trim();
+                  if (trimmed) {
+                    // 更新 ref 中該項目的 displayText 與 textHolder.val
+                    const idx = messageQueueRef.current.findIndex(m => m.id === id);
+                    if (idx !== -1) {
+                      messageQueueRef.current[idx].displayText = trimmed;
+                      messageQueueRef.current[idx].textHolder.val = trimmed;
+                    }
+                    setQueuedMessages(prev => prev.map(m => m.id === id ? { ...m, displayText: trimmed } : m));
+                  }
+                  setEditingQueueId(null);
+                }}
+                onEditCancel={() => setEditingQueueId(null)}
+                onDelete={(id) => {
+                  messageQueueRef.current = messageQueueRef.current.filter(m => m.id !== id);
+                  setQueuedMessages(prev => prev.filter(m => m.id !== id));
+                  if (editingQueueId === id) setEditingQueueId(null);
+                }}
+              />
+            )}
             <EditorContent editor={editor} />
           </div>
           <InputControlBar
@@ -1878,8 +2069,10 @@ function InputAreaInner({ surface }: Required<InputAreaProps>) {
             audioRecordingBusy={audioRecordingState === 'starting' || audioRecordingState === 'stopping'}
             onAudioToggle={handleAudioRecordToggle}
             onSend={handleSend}
+            onQueue={handleQueue}
             onSteer={handleSteer}
             onStop={handleStop}
+            isOptionHeld={isOptionHeld}
           />
           {audioRecorderOpen && showAudioInput && (
             <div className={styles['audio-recording-card']} role="status" aria-live="polite">

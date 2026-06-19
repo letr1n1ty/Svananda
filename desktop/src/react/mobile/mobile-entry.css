@@ -428,6 +428,34 @@ html[data-platform="linux"] .tb-toggle-right {
     background: rgba(120, 180, 120, 0.5);
 }
 
+/* 改善手機版所有主題下社交平台接入按鈕的對比度與主題自適應 */
+html[data-theme] .sidebar-bridge-card {
+    color: var(--sidebar-bridge-card-text, var(--text-light, var(--text-muted)));
+}
+html[data-theme] .sidebar-bridge-card svg {
+    opacity: 0.65;
+    transition: opacity var(--duration-fast) ease;
+}
+html[data-theme] .sidebar-bridge-card:hover svg {
+    opacity: 0.95;
+}
+html[data-theme] .sidebar-bridge-dot.connected {
+    background: var(--green, rgba(120, 180, 120, 0.85));
+}
+
+/* 深色主題自適應調整（適用於手機版所有 opencode 的深色主題） */
+html[data-theme*="-dark"] .sidebar-bridge-card {
+    background: var(--sidebar-bridge-card-bg, rgba(0, 0, 0, 0.28));
+    border: 1px solid var(--sidebar-bridge-card-border, rgba(255, 255, 255, 0.08));
+}
+html[data-theme*="-dark"] .sidebar-bridge-card:hover {
+    background: var(--sidebar-bridge-card-hover-bg, rgba(0, 0, 0, 0.38));
+}
+html[data-theme*="-dark"] .sidebar-bridge-dot {
+    background: rgba(255, 255, 255, 0.15);
+}
+
+
 .browser-bg-bar.hidden {
     display: none;
 }

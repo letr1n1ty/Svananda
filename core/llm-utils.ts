@@ -108,6 +108,7 @@ async function callLlm({
 
 function utilityUsageContext(utilConfig, operation, trigger = "tool") {
   const agentId = utilConfig?.usageAgentId || null;
+  const sessionId = utilConfig?.usageSessionId || null;
   const sessionPath = utilConfig?.usageSessionPath || null;
   return {
     source: {
@@ -116,8 +117,13 @@ function utilityUsageContext(utilConfig, operation, trigger = "tool") {
       surface: "system",
       trigger,
     },
-    attribution: sessionPath
-      ? { kind: "session", agentId, sessionPath }
+    attribution: sessionId || sessionPath
+      ? {
+          kind: "session",
+          agentId,
+          ...(sessionId ? { sessionId } : {}),
+          ...(sessionPath ? { sessionPath } : {}),
+        }
       : { kind: "utility", agentId },
   };
 }
@@ -210,28 +216,41 @@ export function buildLocalSummary(assistantText, toolCalls) {
  */
 export async function summarizeTitle(utilConfig, userText, assistantText, opts: { timeoutMs?: number; signal?: AbortSignal } = {}) {
   try {
-    const isZh = getLocale().startsWith("zh");
+    const locale = getLocale();
+    const isTch = locale === "zh-TW";
+    const isZh = locale.startsWith("zh");
     const { utility: model, api_key, base_url, api } = utilConfig;
     if (!api_key || !base_url || !api) return null;
 
-    const systemContent = isZh
-      ? `你是一个对话标题生成器。根据用户和助手的第一轮对话，用一句极短的话概括对话主题。
+    let systemContent = "";
+    if (isTch) {
+      systemContent = `你是一個對話標題生成器。根據使用者和助手的第一輪對話，用一句極短的話概括對話主題。
+
+規則：
+1. 標題長度嚴格控制在 10 個字以內（中文）或 5 個單字以內（英文）
+2. 語言必須和使用者說的第一句話一致：使用者說繁體中文就用繁體中文，使用者說英文就用英文
+3. 不要加引號、句號或其他標點符號
+4. 直接輸出標題，不要解釋`;
+    } else if (isZh) {
+      systemContent = `你是一个对话标题生成器。根据用户和助手的第一轮对话，用一句极短的话概括对话主题。
 
 规则：
 1. 标题目标约 10 个字（中文）或 5 个单词（英文），保持极短
 2. 语言必须和用户说的第一句话一致：用户说中文就用中文，用户说英文就用英文
 3. 不要加引号、句号或其他标点
-4. 直接输出标题，不要解释`
-      : `You are a conversation title generator. Based on the first exchange between user and assistant, summarize the topic in a very short phrase.
+4. 直接输出标题，不要解释`;
+    } else {
+      systemContent = `You are a conversation title generator. Based on the first exchange between user and assistant, summarize the topic in a very short phrase.
 
 Rules:
 1. Aim for about 5 words in English or 10 characters in Chinese, and keep it very short
 2. The title language must match the user's first message
 3. No quotes, periods, or other punctuation
 4. Output the title directly, no explanation`;
+    }
 
-    const userLabel = isZh ? "用户" : "User";
-    const assistantLabel = isZh ? "助手" : "Assistant";
+    const userLabel = isTch ? "使用者" : (isZh ? "用户" : "User");
+    const assistantLabel = isTch ? "助手" : (isZh ? "助手" : "Assistant");
 
     return await callLlm({
       model, api, api_key, base_url,

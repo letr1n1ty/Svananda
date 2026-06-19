@@ -18,14 +18,15 @@ import {
   applyStudioWorkspace,
   createLocalStudioWorkspaceFromFolder,
   loadStudioWorkspaces,
-  removeRecentWorkspace,
   removeWorkspaceFolder,
+  removeStudioWorkspace,
 } from '../stores/desk-actions';
 import { openSettingsModal } from '../stores/settings-modal-actions';
 import type { Agent, StudioWorkspace } from '../types';
 import { AgentAvatar, refreshAgentAvatarVersion, resolveAgentDisplayInfo, type AgentDisplayInfo } from '../utils/agent-display';
 import styles from './Welcome.module.css';
-import { buildWorkspacePickerItems, normalizeWorkspacePath } from '../../../../shared/workspace-history.ts';
+import { normalizeWorkspacePath } from '../../../../shared/workspace-history.ts';
+
 
 /* eslint-disable @typescript-eslint/no-explicit-any -- store setState 回调 (s: any) */
 
@@ -67,7 +68,6 @@ function WelcomeInner() {
   const studioWorkspaces = useStore(s => s.studioWorkspaces);
   const homeFolder = useStore(s => s.homeFolder);
   const workspaceFolders = useStore(s => s.workspaceFolders);
-  const cwdHistory = useStore(s => s.cwdHistory);
 
   // Determine the displayed agent
   const displayAgent = useMemo(() => {
@@ -127,7 +127,6 @@ function WelcomeInner() {
         studioWorkspaces={studioWorkspaces}
         homeFolder={homeFolder}
         workspaceFolders={workspaceFolders}
-        cwdHistory={cwdHistory}
       />
       <MemoryToggle enabled={memoryEnabled} masterEnabled={memoryMasterEnabled} t={t} />
     </div>
@@ -236,7 +235,6 @@ function FolderPicker({
   studioWorkspaces,
   homeFolder,
   workspaceFolders,
-  cwdHistory,
 }: {
   agents: Agent[];
   currentAgentId: string | null;
@@ -246,7 +244,6 @@ function FolderPicker({
   studioWorkspaces: StudioWorkspace[];
   homeFolder: string | null;
   workspaceFolders: string[];
-  cwdHistory: string[];
 }) {
   const { t } = useI18n();
   const [showHistory, setShowHistory] = useState(false);
@@ -287,12 +284,12 @@ function FolderPicker({
   }, []);
 
   const handleButtonClick = useCallback(() => {
-    if (selectedWorkspaceMountId || selectedFolder || studioWorkspaces.length > 0 || cwdHistory.length > 0 || workspaceFolders.length > 0 || agentHomeFolders.length > 0) {
+    if (selectedWorkspaceMountId || selectedFolder || studioWorkspaces.length > 0 || workspaceFolders.length > 0 || agentHomeFolders.length > 0) {
       setShowHistory(prev => !prev);
     } else {
       handleBrowse();
     }
-  }, [agentHomeFolders.length, cwdHistory.length, handleBrowse, selectedFolder, selectedWorkspaceMountId, studioWorkspaces.length, workspaceFolders.length]);
+  }, [agentHomeFolders.length, handleBrowse, selectedFolder, selectedWorkspaceMountId, studioWorkspaces.length, workspaceFolders.length]);
 
   const handleSelectWorkspace = useCallback((workspace: StudioWorkspace) => {
     setShowHistory(false);
@@ -356,7 +353,6 @@ function FolderPicker({
       </button>
       {showHistory && (
         <FolderHistory
-          cwdHistory={cwdHistory}
           agentHomeFolders={agentHomeFolders}
           selectedFolder={selectedFolder}
           selectedWorkspaceMountId={selectedWorkspaceMountId}
@@ -367,16 +363,15 @@ function FolderPicker({
           onSelect={handleSelectHistory}
           onBrowse={handleBrowse}
           onAddWorkspaceFolder={handleAddWorkspaceFolder}
-          onRemoveRecentWorkspace={removeRecentWorkspace}
           onRemoveWorkspaceFolder={removeWorkspaceFolder}
+          onRemoveStudioWorkspace={removeStudioWorkspace}
         />
       )}
     </div>
   );
 }
 
-function FolderHistory({ cwdHistory, agentHomeFolders, selectedFolder, selectedWorkspaceMountId, studioWorkspaces, homeFolder, workspaceFolders, onSelectWorkspace, onSelect, onBrowse, onAddWorkspaceFolder, onRemoveRecentWorkspace, onRemoveWorkspaceFolder }: {
-  cwdHistory: string[];
+function FolderHistory({ agentHomeFolders, selectedFolder, selectedWorkspaceMountId, studioWorkspaces, homeFolder, workspaceFolders, onSelectWorkspace, onSelect, onBrowse, onAddWorkspaceFolder, onRemoveWorkspaceFolder, onRemoveStudioWorkspace }: {
   agentHomeFolders: string[];
   selectedFolder: string | null;
   selectedWorkspaceMountId: string | null;
@@ -387,81 +382,64 @@ function FolderHistory({ cwdHistory, agentHomeFolders, selectedFolder, selectedW
   onSelect: (folder: string) => void;
   onBrowse: () => void;
   onAddWorkspaceFolder: () => void;
-  onRemoveRecentWorkspace: (folder: string) => void;
   onRemoveWorkspaceFolder: (folder: string) => void;
+  onRemoveStudioWorkspace: (mountId: string) => void;
 }) {
-  const primaryItems: string[] = buildWorkspacePickerItems({
-    selectedFolder,
-    homeFolder,
-    cwdHistory: [...agentHomeFolders, ...cwdHistory],
-  });
-  const primaryItemCount = studioWorkspaces.length + primaryItems.length;
-  const primaryScrollable = primaryItemCount > 5;
-  const extraScrollable = workspaceFolders.length > 5;
-  const removableHistory = new Set(cwdHistory.map(normalizeWorkspacePath).filter(Boolean));
   const t = window.t ?? ((p: string) => p);
   return (
     <div className={styles.folderHistory}>
       <div className={styles.folderHistorySectionLabel}>
         {t('input.currentWorkspace')}
       </div>
-      <div
-        className={`${styles.folderHistoryList}${primaryScrollable ? ` ${styles.folderHistoryListScrollable}` : ''}`}
-        data-folder-history-list="primary"
-        data-scrollable={primaryScrollable ? 'true' : 'false'}
-      >
-        {studioWorkspaces.map(workspace => {
-          const isActive = workspace.mountId === selectedWorkspaceMountId;
-          return (
-            <div
-              key={`studio:${workspace.mountId}`}
-              className={`${styles.folderHistoryItem}${isActive ? ` ${styles.folderHistoryItemActive}` : ''}`}
-              title={workspace.label}
-              onClick={(e) => { e.stopPropagation(); onSelectWorkspace(workspace); }}
-            >
-              <span className={styles.folderHistoryItemIcon}>
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
-                </svg>
-              </span>
-              <span className={styles.folderHistoryItemName}>{workspace.label}</span>
-            </div>
-          );
-        })}
-        {primaryItems.map(p => {
-          const name = p.split('/').pop() || p;
-          const isActive = p === selectedFolder;
-          return (
-            <div
-              key={p}
-              className={`${styles.folderHistoryItem}${isActive ? ` ${styles.folderHistoryItemActive}` : ''}`}
-              title={p}
-              onClick={(e) => { e.stopPropagation(); onSelect(p); }}
-            >
-              <span className={styles.folderHistoryItemIcon}>
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
-                </svg>
-              </span>
-              <span className={styles.folderHistoryItemName}>{name}</span>
-              {removableHistory.has(normalizeWorkspacePath(p)) && (
-                <button
-                  type="button"
-                  className={styles.folderHistoryRemove}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onRemoveRecentWorkspace(p);
-                  }}
-                  title={t('input.removeRecentWorkspace')}
-                  aria-label={t('input.removeRecentWorkspace')}
-                >
-                  x
-                </button>
-              )}
-            </div>
-          );
-        })}
-      </div>
+      {studioWorkspaces.map(workspace => {
+        const isActive = workspace.mountId === selectedWorkspaceMountId;
+        const isDefault = workspace.mountId === 'default';
+        return (
+          <div
+            key={`studio:${workspace.mountId}`}
+            className={`${styles.folderHistoryItem}${isActive ? ` ${styles.folderHistoryItemActive}` : ''}`}
+            title={workspace.label}
+            onClick={(e) => { e.stopPropagation(); onSelectWorkspace(workspace); }}
+          >
+            <span className={styles.folderHistoryItemIcon}>
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+              </svg>
+            </span>
+            <span className={styles.folderHistoryItemName}>{workspace.label}</span>
+            {!isDefault && !isActive && (
+              <button
+                type="button"
+                className={styles.folderHistoryRemove}
+                onPointerDown={(e) => {
+                  e.stopPropagation();
+                  e.preventDefault();
+                }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  e.preventDefault();
+                  onRemoveStudioWorkspace(workspace.mountId);
+                }}
+                title={t('input.removeStudioWorkspace') || 'Remove Workspace'}
+                aria-label={t('input.removeStudioWorkspace')}
+              >
+                x
+              </button>
+            )}
+            {!isDefault && isActive && (
+              <button
+                type="button"
+                className={styles.folderHistoryRemove}
+                disabled
+                title="需切換至其他工作台方可解除掛載"
+                style={{ opacity: 0.3, cursor: 'not-allowed' }}
+              >
+                x
+              </button>
+            )}
+          </div>
+        );
+      })}
       <div className={styles.folderHistoryDivider} />
       <div className={styles.folderHistoryBrowse} onClick={(e) => { e.stopPropagation(); onBrowse(); }}>
         <span className={styles.folderHistoryItemIcon}>
@@ -477,41 +455,40 @@ function FolderHistory({ cwdHistory, agentHomeFolders, selectedFolder, selectedW
       <div className={styles.folderHistorySectionLabel}>
         {t('input.extraFolders')}
       </div>
-      <div
-        className={`${styles.folderHistoryList}${extraScrollable ? ` ${styles.folderHistoryListScrollable}` : ''}`}
-        data-folder-history-list="extra"
-        data-scrollable={extraScrollable ? 'true' : 'false'}
-      >
-        {workspaceFolders.map(p => {
-          const name = p.split('/').pop() || p;
-          return (
-            <div
-              key={p}
-              className={styles.folderHistoryItem}
-              title={p}
-              onClick={(e) => { e.stopPropagation(); }}
+      {workspaceFolders.map(p => {
+        const name = p.split('/').pop() || p;
+        return (
+          <div
+            key={p}
+            className={styles.folderHistoryItem}
+            title={p}
+            onClick={(e) => { e.stopPropagation(); }}
+          >
+            <span className={styles.folderHistoryItemIcon}>
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+              </svg>
+            </span>
+            <span className={styles.folderHistoryItemName}>{name}</span>
+            <button
+              type="button"
+              className={styles.folderHistoryRemove}
+              onPointerDown={(e) => {
+                e.stopPropagation();
+                e.preventDefault();
+                onRemoveWorkspaceFolder(p);
+              }}
+              onClick={(e) => {
+                e.stopPropagation();
+                e.preventDefault();
+              }}
+              title={(window.t ?? ((key: string) => key))('common.remove')}
             >
-              <span className={styles.folderHistoryItemIcon}>
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
-                </svg>
-              </span>
-              <span className={styles.folderHistoryItemName}>{name}</span>
-              <button
-                type="button"
-                className={styles.folderHistoryRemove}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onRemoveWorkspaceFolder(p);
-                }}
-                title={(window.t ?? ((key: string) => key))('common.remove')}
-              >
-                x
-              </button>
-            </div>
-          );
-        })}
-      </div>
+              x
+            </button>
+          </div>
+        );
+      })}
       <div className={styles.folderHistoryBrowse} onClick={(e) => { e.stopPropagation(); onAddWorkspaceFolder(); }}>
         <span className={styles.folderHistoryItemIcon}>
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">

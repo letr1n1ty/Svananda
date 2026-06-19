@@ -10,7 +10,10 @@
  * （角色卡、插件、技能、desk skill）都不需要 symlink entry。
  */
 
-import extractZipImpl from "extract-zip";
+import fs from "fs";
+import fsp from "fs/promises";
+import path from "path";
+import yauzl from "yauzl";
 
 const IFMT = 0o170000;
 const IFLNK = 0o120000;
@@ -21,16 +24,91 @@ export function isSymlinkEntry(entry) {
   return (mode & IFMT) === IFLNK;
 }
 
-function rejectSymlinkEntries(entry) {
-  if (isSymlinkEntry(entry)) {
-    const name = entry?.fileName || "<unnamed>";
-    throw new Error(`extract-zip: symlink entry is not allowed (entry: ${name})`);
-  }
-}
-
 export async function extractZip(zipPath, destDir) {
-  await extractZipImpl(zipPath, {
-    dir: destDir,
-    onEntry: rejectSymlinkEntries,
+  const absoluteDestDir = path.resolve(destDir);
+  await fsp.mkdir(absoluteDestDir, { recursive: true });
+  const canonicalDestDir = await fsp.realpath(absoluteDestDir);
+
+  return new Promise<void>((resolve, reject) => {
+    yauzl.open(zipPath, { lazyEntries: true }, (err, zipfile) => {
+      if (err) return reject(err);
+
+      zipfile.readEntry();
+
+      zipfile.on("error", (err) => {
+        reject(err);
+      });
+
+      zipfile.on("close", () => {
+        resolve();
+      });
+
+      zipfile.on("entry", async (entry) => {
+        if (isSymlinkEntry(entry)) {
+          zipfile.close();
+          return reject(new Error(`extract-zip: symlink entry is not allowed (entry: ${entry.fileName})`));
+        }
+
+        const destPath = path.join(canonicalDestDir, entry.fileName);
+        const relative = path.relative(canonicalDestDir, destPath);
+        if (relative.split(path.sep).includes("..")) {
+          zipfile.close();
+          return reject(new Error(`extract-zip: Out of bound path "${destPath}" found for entry ${entry.fileName}`));
+        }
+
+        const mode = (entry.externalFileAttributes >> 16) & 0xFFFF;
+        const IFDIR = 0o040000;
+        let isDir = (mode & IFMT) === IFDIR;
+        if (!isDir && entry.fileName.endsWith("/")) {
+          isDir = true;
+        }
+        const madeBy = entry.versionMadeBy >> 8;
+        if (!isDir) {
+          isDir = (madeBy === 0 && entry.externalFileAttributes === 16);
+        }
+
+        const procMode = (mode === 0 ? (isDir ? 0o755 : 0o644) : mode) & 0o777;
+
+        if (isDir) {
+          try {
+            await fsp.mkdir(destPath, { recursive: true, mode: procMode });
+            zipfile.readEntry();
+          } catch (err) {
+            zipfile.close();
+            reject(err);
+          }
+          return;
+        }
+
+        try {
+          await fsp.mkdir(path.dirname(destPath), { recursive: true });
+          zipfile.openReadStream(entry, (err, readStream) => {
+            if (err) {
+              zipfile.close();
+              return reject(err);
+            }
+            const chunks = [];
+            readStream.on("data", (chunk) => chunks.push(chunk));
+            readStream.on("end", async () => {
+              try {
+                await fsp.writeFile(destPath, Buffer.concat(chunks), { mode: procMode });
+                zipfile.readEntry();
+              } catch (err) {
+                zipfile.close();
+                reject(err);
+              }
+            });
+            readStream.on("error", (err) => {
+              zipfile.close();
+              reject(err);
+            });
+          });
+        } catch (err) {
+          zipfile.close();
+          reject(err);
+        }
+      });
+    });
   });
 }
+

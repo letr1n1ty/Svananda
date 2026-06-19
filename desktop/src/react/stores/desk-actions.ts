@@ -16,7 +16,7 @@ import {
 } from './workspace-ui-state-actions';
 import { hasServerConnection } from '../services/server-connection';
 import { isWebRuntime } from '../utils/platform-runtime';
-import { mergeWorkspaceHistory, normalizeWorkspacePath, removeWorkspaceHistoryEntries } from '../../../../shared/workspace-history.ts';
+import { mergeWorkspaceHistory, normalizeWorkspacePath } from '../../../../shared/workspace-history.ts';
 
 /* eslint-disable @typescript-eslint/no-explicit-any -- store setState 回调及 IPC callback data */
 
@@ -147,6 +147,7 @@ export async function createLocalStudioWorkspaceFromFolder(folder: string): Prom
   }
 }
 
+
 export async function applyStudioWorkspace(workspace: Pick<StudioWorkspace, 'mountId' | 'label'> & Partial<Pick<StudioWorkspace, 'nativeRootPath'>>): Promise<void> {
   const mountId = normalizeMountId(workspace.mountId);
   if (!mountId) return;
@@ -166,6 +167,42 @@ export async function applyStudioWorkspace(workspace: Pick<StudioWorkspace, 'mou
     useStore.getState().requestInputFocus();
   }
   await loadDeskFiles('', null, mountId);
+}
+
+export async function removeStudioWorkspace(mountId: string): Promise<boolean> {
+  const normalized = normalizeMountId(mountId);
+  const s = useStore.getState();
+  if (!normalized || !hasServerConnection(s)) return false;
+  useStore.setState((state: any) => ({
+    studioWorkspaces: (state.studioWorkspaces || [])
+      .filter((workspace: StudioWorkspace) => workspace.mountId !== normalized),
+  }));
+  try {
+    const res = await hanaFetch(`/api/studio/workspaces/${encodeURIComponent(normalized)}`, {
+      method: 'DELETE',
+    });
+    const data = await res.json();
+    if (data.error) throw new Error(String(data.error));
+    const nextWorkspaces = await loadStudioWorkspaces();
+    const latest = useStore.getState();
+    if (latest.selectedWorkspaceMountId === normalized || latest.deskWorkspaceMountId === normalized) {
+      useStore.setState({
+        selectedWorkspaceMountId: null,
+        selectedWorkspaceLabel: null,
+      });
+      const defaultWorkspace = nextWorkspaces.find((workspace) => workspace.isDefault);
+      if (defaultWorkspace && defaultWorkspace.nativeRootPath) {
+        await activateWorkspaceDesk(defaultWorkspace.nativeRootPath, { mountId: null, reload: true });
+      } else {
+        await activateWorkspaceDesk(null, { mountId: null, reload: false });
+      }
+    }
+    return true;
+  } catch (err) {
+    console.error('[workspace] remove studio workspace failed:', err);
+    await loadStudioWorkspaces();
+    return false;
+  }
 }
 
 function buildWorkspaceDeskState(s: ReturnType<typeof useStore.getState>): WorkspaceDeskState {
@@ -385,11 +422,6 @@ export async function loadDeskFiles(subdir?: string, overrideDir?: string | null
   } catch (err) {
     console.error('[jian-desk] load failed:', err);
     if (myVersion !== _deskLoadVersion) return;
-    const st = useStore.getState();
-    st.setDeskFiles([]);
-    st.setDeskCurrentPath('');
-    st.setDeskTreeFiles('', []);
-    st.setDeskJianContent(null);
     updateDeskContextBtn();
   }
 }
@@ -534,7 +566,6 @@ export async function loadDeskTreeFiles(subdir = '', options: { force?: boolean;
   } catch (err) {
     console.error('[desk-tree] load failed:', err);
     if (_deskTreeLoadVersion.get(key) !== myVersion) return;
-    useStore.getState().setDeskTreeFiles(normalizedSubdir, []);
   }
 }
 
@@ -1178,47 +1209,6 @@ async function persistWorkspaceHistory(folder: string): Promise<void> {
   }
 }
 
-export async function removeRecentWorkspace(folder: string): Promise<void> {
-  const normalized = normalizeFolder(folder);
-  if (!normalized) return;
-  useStore.setState((s: any) => ({
-    cwdHistory: removeWorkspaceHistoryEntries(s.cwdHistory, [normalized]),
-  }));
-  const s = useStore.getState();
-  if (!hasServerConnection(s)) return;
-  try {
-    const res = await hanaFetch('/api/config/workspaces/recent', {
-      method: 'DELETE',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ path: normalized }),
-    });
-    const data = await res.json();
-    if (data.error) throw new Error(String(data.error));
-    if (Array.isArray(data.cwd_history)) {
-      useStore.setState({ cwdHistory: mergeWorkspaceHistory(data.cwd_history, []) });
-    }
-  } catch (err) {
-    console.error('[workspace] remove recent history failed:', err);
-  }
-}
-
-export async function clearRecentWorkspaces(): Promise<void> {
-  useStore.setState({ cwdHistory: [] });
-  const s = useStore.getState();
-  if (!hasServerConnection(s)) return;
-  try {
-    const res = await hanaFetch('/api/config/workspaces/recent/all', {
-      method: 'DELETE',
-    });
-    const data = await res.json();
-    if (data.error) throw new Error(String(data.error));
-    if (Array.isArray(data.cwd_history)) {
-      useStore.setState({ cwdHistory: mergeWorkspaceHistory(data.cwd_history, []) });
-    }
-  } catch (err) {
-    console.error('[workspace] clear recent history failed:', err);
-  }
-}
 
 export function addWorkspaceFolder(folder: string): void {
   const normalized = normalizeFolder(folder);

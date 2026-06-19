@@ -14,7 +14,6 @@ import { WorkflowInlineCard } from './WorkflowInlineCard';
 import { InterludeBlock } from './InterludeBlock';
 import { SettingsConfirmCard } from './SettingsConfirmCard';
 import { SettingsUpdateCard } from './SettingsUpdateCard';
-import { MessageActions } from './MessageActions';
 import { MessageFooterActions, formatMessageTime, type MessageFooterAction } from './MessageFooterActions';
 import { ChatResourceCard } from './ChatResourceCard';
 import { FileResourceIcon, SkillResourceIcon } from './ChatResourceIcons';
@@ -33,7 +32,7 @@ import { resolveServerConnection } from '../../services/server-connection';
 import { resolveFileRefUrl } from '../../services/resource-url';
 import type { FileRef } from '../../types/file-ref';
 import { openPreview } from '../../stores/preview-actions';
-import { replayLatestUserMessage } from '../../stores/message-turn-actions';
+import { replayLatestUserMessage, branchFromMessage } from '../../stores/message-turn-actions';
 import { selectIsStreamingSession, selectSelectedIdsBySession } from '../../stores/session-selectors';
 import { extractSelectedTexts } from '../../utils/message-text';
 import { AgentAvatar, resolveAgentDisplayInfo } from '../../utils/agent-display';
@@ -141,20 +140,82 @@ export const AssistantMessage = memo(function AssistantMessage({
     }
   }, [isStreaming, retrying, retrySourceMessage, sessionPath]);
 
+  const [branching, setBranching] = useState(false);
+  const handleBranch = useCallback(async () => {
+    if (branching || isStreaming || !message.sourceEntryId) return;
+    setBranching(true);
+    try {
+      await branchFromMessage(sessionPath, message);
+    } finally {
+      setBranching(false);
+    }
+  }, [branching, isStreaming, message, sessionPath]);
+
   const canShowRegenerateAction = !readOnly && isLatestAssistantMessage && !!retrySourceMessage && !isStreaming;
   const shouldShowCompletionTime = showTurnCompletionTime ?? isLatestAssistantMessage;
   const shouldPersistCompletionTime = shouldShowCompletionTime && isLatestAssistantMessage && !isStreaming;
   const timeText = shouldShowCompletionTime ? formatMessageTime(message.timestamp) : null;
-  const regenerateActions: MessageFooterAction[] = useMemo(() => [
-    {
-      id: 'regenerate',
-      title: t('common.regenerate'),
-      icon: <RegenerateIcon />,
-      onClick: () => { void handleRegenerate(); },
-      disabled: retrying || isStreaming,
-    },
-  ], [handleRegenerate, isStreaming, retrying, t]);
-  const footerActions = canShowRegenerateAction ? regenerateActions : [];
+  const footerActions = useMemo(() => {
+    const actions: MessageFooterAction[] = [];
+
+    // 1. Regenerate
+    if (canShowRegenerateAction) {
+      actions.push({
+        id: 'regenerate',
+        title: t('common.regenerate'),
+        icon: <RegenerateIcon />,
+        onClick: () => { void handleRegenerate(); },
+        disabled: retrying || isStreaming,
+      });
+    }
+
+    // 2. Copy
+    actions.push({
+      id: 'copy',
+      title: copied ? (t('common.copied') || 'Copied') : t('common.copyText'),
+      icon: copied ? <CheckIcon /> : <CopyIcon />,
+      onClick: () => handleCopy(),
+      disabled: isStreaming,
+      active: copied,
+    });
+
+    // 3. Screenshot
+    actions.push({
+      id: 'screenshot',
+      title: t('common.screenshot'),
+      icon: <ScreenshotIcon />,
+      onClick: () => { void handleScreenshot(); },
+      disabled: isStreaming,
+    });
+
+    // 4. Branch
+    if (!readOnly && !!message.sourceEntryId && !isInterludeOnly) {
+      actions.push({
+        id: 'branch',
+        title: t('chat.branchFromHere'),
+        icon: <BranchIcon />,
+        onClick: () => { void handleBranch(); },
+        disabled: branching || isStreaming,
+        active: branching,
+      });
+    }
+
+    return actions;
+  }, [
+    branching,
+    canShowRegenerateAction,
+    copied,
+    handleBranch,
+    handleCopy,
+    handleRegenerate,
+    handleScreenshot,
+    isInterludeOnly,
+    isStreaming,
+    message.sourceEntryId,
+    readOnly,
+    retrying,
+    t,
+  ]);
 
   return (
     <div className={`${styles.messageGroup} ${styles.messageGroupAssistant}${isInterludeOnly ? ` ${styles.messageGroupInterludeOnly}` : ''}${isSelected ? ` ${styles.messageGroupSelected}` : ''}`}
@@ -192,24 +253,28 @@ export const AssistantMessage = memo(function AssistantMessage({
           </ContentBlockErrorBoundary>
         ))}
       </div>
-      {!readOnly && !isInterludeOnly && (
-        <MessageActions
-          messageId={message.id}
-          sessionPath={sessionPath}
-          onCopy={handleCopy}
-          onScreenshot={handleScreenshot}
-          copied={copied}
-          isStreaming={isStreaming}
-        />
-      )}
       {!isInterludeOnly && (timeText || footerActions.length > 0) && (
-        <MessageFooterActions
-          align="left"
-          timeText={timeText}
-          timePersistent={shouldPersistCompletionTime}
-          actions={footerActions}
-          testId="assistant-completion-actions"
-        />
+        <div
+          className={`${styles.assistantFooterContainer}${shouldPersistCompletionTime ? ` ${styles.messageFooterActionsTimePersistent}` : ''}`}
+          data-testid="assistant-completion-actions"
+        >
+          <div>
+            {timeText && <span className={styles.messageFooterTime}>{timeText}</span>}
+          </div>
+          <div className={styles.assistantFooterRightActions}>
+            {footerActions.map(action => (
+              <button
+                key={action.id}
+                className={`${styles.messageFooterBtn}${action.active ? ` ${styles.messageFooterBtnActive}` : ''}`}
+                onClick={action.onClick}
+                title={action.title}
+                disabled={action.disabled}
+              >
+                {action.icon}
+              </button>
+            ))}
+          </div>
+        </div>
       )}
     </div>
   );
@@ -219,6 +284,43 @@ function RegenerateIcon() {
   return (
     <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
       <path d="M21 3v5m0 0h-5m5 0-3-2.708A9 9 0 1 0 20.777 14" />
+    </svg>
+  );
+}
+
+function BranchIcon() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+      <line x1="6" y1="3" x2="6" y2="15" />
+      <circle cx="18" cy="6" r="3" />
+      <circle cx="6" cy="18" r="3" />
+      <path d="M18 9a9 9 0 0 1-9 9" />
+    </svg>
+  );
+}
+
+function CopyIcon() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+      <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+    </svg>
+  );
+}
+
+function ScreenshotIcon() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
+      <circle cx="12" cy="13" r="4" />
+    </svg>
+  );
+}
+
+function CheckIcon() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+      <polyline points="20 6 9 17 4 12" />
     </svg>
   );
 }

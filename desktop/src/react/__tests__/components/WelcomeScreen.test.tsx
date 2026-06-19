@@ -31,6 +31,8 @@ const translations: Record<string, string | string[] | Record<string, { avatar: 
   'input.noCustomProjects': '暂无自定义项目',
   'input.selectOtherFolder': '选择其他文件夹',
   'input.removeRecentWorkspace': '从列表移除',
+  'input.removeStudioWorkspace': '移除工作台',
+  'input.removeWorkspace': '移除工作台',
   'input.extraFolders': '额外文件夹',
   'input.addExternalFolder': '添加工作台以外的文件夹',
   'welcome.messages': ['想到什么就说什么吧~'],
@@ -106,33 +108,6 @@ describe('WelcomeScreen workspace picker', () => {
     expect(extraLabel.compareDocumentPosition(addExternal) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
-  it('turns folder groups into scrollable lists after five items', async () => {
-    useStore.setState({
-      cwdHistory: [
-        '/workspace/One',
-        '/workspace/Two',
-        '/workspace/Three',
-        '/workspace/Four',
-        '/workspace/Five',
-        '/workspace/Six',
-      ],
-      workspaceFolders: [
-        '/workspace/ExtraOne',
-        '/workspace/ExtraTwo',
-        '/workspace/ExtraThree',
-        '/workspace/ExtraFour',
-        '/workspace/ExtraFive',
-        '/workspace/ExtraSix',
-      ],
-    } as never);
-    const { WelcomeScreen } = await import('../../components/WelcomeScreen');
-
-    const { container } = render(<WelcomeScreen />);
-    fireEvent.click(screen.getByRole('button', { name: /工作台：Desktop/ }));
-
-    expect(container.querySelector('[data-folder-history-list="primary"]')).toHaveAttribute('data-scrollable', 'true');
-    expect(container.querySelector('[data-folder-history-list="extra"]')).toHaveAttribute('data-scrollable', 'true');
-  });
 
   it('selects a Studio workspace by mountId instead of a local path', async () => {
     mocks.hanaFetch.mockImplementation(async (path: string) => {
@@ -170,25 +145,43 @@ describe('WelcomeScreen workspace picker', () => {
     expect(mocks.hanaFetch.mock.calls.some(([path]) => path === '/api/workbench/files?mountId=mount_docs')).toBe(true);
   });
 
-  it('removes a recent workspace from the picker without switching workspace', async () => {
-    mocks.hanaFetch.mockResolvedValueOnce(new Response(JSON.stringify({
-      ok: true,
-      cwd_history: [],
-    }), { status: 200 }));
+  it('shows a remove button for user-added Studio workspaces', async () => {
+    useStore.setState({
+      selectedWorkspaceMountId: 'default',
+      selectedWorkspaceLabel: 'Default',
+      selectedFolder: null,
+      studioWorkspaces: [
+        { workspaceId: 'default', mountId: 'default', label: 'Default', isDefault: true },
+        { workspaceId: 'mount_docs', mountId: 'mount_docs', label: 'Docs', isDefault: false },
+      ],
+    } as never);
+    mocks.hanaFetch.mockImplementation(async (path: string, opts?: RequestInit) => {
+      if (path === '/api/studio/workspaces/mount_docs' && opts?.method === 'DELETE') {
+        return new Response(JSON.stringify({ ok: true, mountId: 'mount_docs' }), { status: 200 });
+      }
+      if (path === '/api/studio/workspaces') {
+        return new Response(JSON.stringify({
+          workspaces: [{ workspaceId: 'default', mountId: 'default', label: 'Default', isDefault: true }],
+        }), { status: 200 });
+      }
+      return new Response(JSON.stringify({ ok: true }), { status: 200 });
+    });
     const { WelcomeScreen } = await import('../../components/WelcomeScreen');
 
     render(<WelcomeScreen />);
-    fireEvent.click(screen.getByRole('button', { name: /工作台：Desktop/ }));
-    fireEvent.click(screen.getByRole('button', { name: '从列表移除' }));
+    fireEvent.click(screen.getByRole('button', { name: /工作台：Default/ }));
 
-    expect(useStore.getState().selectedFolder).toBe('/workspace/Desktop');
-    expect(useStore.getState().cwdHistory).toEqual([]);
-    expect(mocks.hanaFetch).toHaveBeenCalledWith('/api/config/workspaces/recent', expect.objectContaining({
+    expect(screen.queryByTitle('移除工作台')).toBeInTheDocument();
+    expect(screen.queryAllByTitle('移除工作台')).toHaveLength(1);
+    fireEvent.click(screen.getByTitle('移除工作台'));
+
+    await waitFor(() => {
+      expect(useStore.getState().studioWorkspaces.map(workspace => workspace.mountId)).toEqual(['default']);
+    });
+    expect(mocks.hanaFetch).toHaveBeenCalledWith('/api/studio/workspaces/mount_docs', expect.objectContaining({
       method: 'DELETE',
-      body: JSON.stringify({ path: '/workspace/Desktop/project-hana' }),
     }));
   });
-
   it('does not show a project picker while creating a new session', async () => {
     const { WelcomeScreen } = await import('../../components/WelcomeScreen');
 

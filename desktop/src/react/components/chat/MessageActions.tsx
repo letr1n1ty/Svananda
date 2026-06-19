@@ -3,6 +3,7 @@ import { memo, useCallback, useMemo } from 'react';
 import { useStore } from '../../stores';
 import { useI18n } from '../../hooks/use-i18n';
 import { selectSelectedIdsBySession } from '../../stores/session-selectors';
+import { sessionScopedValue } from '../../stores/session-slice';
 import styles from './Chat.module.css';
 
 interface Props {
@@ -13,14 +14,18 @@ interface Props {
   copied: boolean;
   isStreaming: boolean;
   align?: 'left' | 'right';
+  onBranch?: () => void;
+  canBranch?: boolean;
+  branching?: boolean;
 }
 
 export const MessageActions = memo(function MessageActions({
   messageId, sessionPath, onCopy, onScreenshot, copied, isStreaming, align = 'right',
+  onBranch, canBranch = false, branching = false,
 }: Props) {
   const { t } = useI18n();
   const selectedIds = useStore(s => selectSelectedIdsBySession(s, sessionPath));
-  const sessionItems = useStore(s => s.chatSessions[sessionPath]?.items);
+  const sessionItems = useStore(s => sessionScopedValue(s, s.chatSessions, sessionPath)?.items);
   const isSelected = selectedIds.includes(messageId);
   const toggle = useStore(s => s.toggleMessageSelection);
   const setSelection = useStore(s => s.setMessageSelection);
@@ -47,6 +52,22 @@ export const MessageActions = memo(function MessageActions({
       className={`${styles.msgActions}${align === 'left' ? ` ${styles.msgActionsLeft}` : ''}${isSelected ? ` ${styles.msgActionsVisible}` : ''}`}
     >
       <div className={styles.msgActionsPopover}>
+        {canBranch && (
+          <button
+            className={`${styles.msgActionBtn}${branching ? ` ${styles.msgActionBtnActive}` : ''}`}
+            onClick={onBranch}
+            title={t('chat.branchFromHere')}
+            disabled={isStreaming || branching}
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+              strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="6" y1="3" x2="6" y2="15" />
+              <circle cx="18" cy="6" r="3" />
+              <circle cx="6" cy="18" r="3" />
+              <path d="M18 9a9 9 0 0 1-9 9" />
+            </svg>
+          </button>
+        )}
         <button
           className={`${styles.msgActionBtn}${copied ? ` ${styles.msgActionBtnCopied}` : ''}`}
           onClick={onCopy}

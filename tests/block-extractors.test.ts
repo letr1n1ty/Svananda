@@ -551,8 +551,8 @@ describe('computer session confirmation extraction', () => {
       kind: 'computer_app_approval',
       surface: 'input',
       status: 'confirmed',
-      title: '允许 Hana 使用电脑',
-      body: 'Hana 想控制这个应用来继续当前任务。',
+      title: '允许 Svananda 使用电脑',
+      body: 'Svananda 想控制这个应用来继续当前任务。',
       subject: { label: 'Mock Notes', detail: 'mock · app.notes' },
       severity: 'elevated',
       actions: { confirmLabel: '同意', rejectLabel: '拒绝' },
@@ -795,6 +795,24 @@ describe('subagent', () => {
       streamStatus: "running",
     });
     expect(blocks[0].label).toBeNull();
+  });
+
+  it("subagent: 新 details 保留 child sessionId，同时兼容 streamKey path", () => {
+    const blocks = (extractBlocks as any)("subagent", {
+      taskId: "t-session-id",
+      task: "任务：整理桌面\n\n请独立完成",
+      taskTitle: "任务：整理桌面",
+      sessionId: "sess_child_block",
+      sessionPath: "/s/moved-child.jsonl",
+      streamStatus: "running",
+    });
+
+    expect(blocks[0]).toMatchObject({
+      type: "subagent",
+      taskId: "t-session-id",
+      sessionId: "sess_child_block",
+      streamKey: "/s/moved-child.jsonl",
+    });
   });
 
   it("subagent: 展示 label 透传到块，旧 reuseInstance 可兼容映射", () => {

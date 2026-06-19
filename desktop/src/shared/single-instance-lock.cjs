@@ -15,10 +15,10 @@ function normalizeForCompare(filePath) {
 
 function getUserDataAppName(hanakoHome, defaultHome) {
   if (normalizeForCompare(hanakoHome) === normalizeForCompare(defaultHome)) {
-    return "Hanako";
+    return "Svananda";
   }
   const suffix = path.basename(hanakoHome).replace(/^\./, "");
-  if (!suffix) return "Hanako";
+  if (!suffix) return "Svananda";
   return suffix.charAt(0).toUpperCase() + suffix.slice(1);
 }
 

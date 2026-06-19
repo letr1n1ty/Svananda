@@ -59,12 +59,49 @@ export function upsertStudioMount(hanakoHome, mount, { now = new Date().toISOStr
   return clonePlain(existingIndex >= 0 ? registry.mounts[existingIndex] : normalized);
 }
 
+export function disableStudioMount(
+  hanakoHome,
+  mountId,
+  options: { hostStudioId?: string; now?: string } = {},
+) {
+  const { hostStudioId, now = new Date().toISOString() } = options;
+  if (!isNonEmptyString(mountId)) throw new Error("mountId required");
+  if (hostStudioId !== undefined && !isNonEmptyString(hostStudioId)) throw new Error("hostStudioId required");
+  const registry = loadStudioMountRegistry(hanakoHome);
+  const existingIndex = registry.mounts.findIndex((item) =>
+    item.mountId === mountId && (hostStudioId === undefined || item.hostStudioId === hostStudioId)
+  );
+  if (existingIndex < 0) throw new Error(`studio mount not found: ${mountId}`);
+  registry.mounts[existingIndex] = {
+    ...registry.mounts[existingIndex],
+    status: "disabled",
+    updatedAt: now,
+  };
+  registry.updatedAt = now;
+  validateStudioMountRegistry(registry);
+  writeJsonAtomic(path.join(hanakoHome, STUDIO_MOUNTS_FILE), registry);
+  return clonePlain(registry.mounts[existingIndex]);
+}
+
 export function listStudioMountsForStudio(hanakoHome, hostStudioId) {
   if (!isNonEmptyString(hostStudioId)) throw new Error("hostStudioId required");
   const registry = loadStudioMountRegistry(hanakoHome);
   return registry.mounts
     .filter((mount) => mount.hostStudioId === hostStudioId)
     .map(clonePlain);
+}
+
+export function removeStudioMount(hanakoHome, mountId) {
+  if (!isNonEmptyString(mountId)) throw new Error("mountId required");
+  const registry = loadStudioMountRegistry(hanakoHome);
+  const initialLength = registry.mounts.length;
+  registry.mounts = registry.mounts.filter((m) => m.mountId !== mountId);
+  if (registry.mounts.length !== initialLength) {
+    registry.updatedAt = new Date().toISOString();
+    writeJsonAtomic(path.join(hanakoHome, STUDIO_MOUNTS_FILE), registry);
+    return true;
+  }
+  return false;
 }
 
 export function validateStudioMountRegistry(value) {

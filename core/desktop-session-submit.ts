@@ -18,7 +18,7 @@
  * @param {string} [opts.clientMessageId]
  * @param {(delta: string, accumulated: string) => void} [opts.onDelta]
  * @param {object} [opts.displayMessage]
- * @param {Array<{fileId?:string, sessionPath?:string, label?:string, kind?:string}>} [opts.sessionFileRefs]
+ * @param {Array<{fileId?:string, sessionId?:string, sessionPath?:string, label?:string, kind?:string}>} [opts.sessionFileRefs]
  * @param {object|null|undefined} [opts.uiContext]
  * @param {object|null|undefined} [opts.context]
  * @returns {Promise<{ text: string | null, toolMedia: string[] }>}
@@ -83,11 +83,11 @@ export async function submitDesktopSessionMessage(engine: any, opts: {
   clientMessageId?: string;
   onDelta?: (delta: string, accumulated: string) => void;
   displayMessage?: any;
-  sessionFileRefs?: Array<{ fileId?: string; sessionPath?: string; label?: string; kind?: string }>;
+  sessionFileRefs?: Array<{ fileId?: string; sessionId?: string; sessionPath?: string; label?: string; kind?: string }>;
   uiContext?: any;
   context?: any;
 } = {}) {
-  const {
+  let {
     sessionPath,
     text,
     images,
@@ -110,17 +110,20 @@ export async function submitDesktopSessionMessage(engine: any, opts: {
   }
   if (!sessionPath) throw new Error("desktop-session-submit: sessionPath is required");
   if (!text && !images?.length && !videos?.length && !audios?.length) throw new Error("desktop-session-submit: text, images, videos, or audios required");
-  if (pendingDesktopSessionSubmissions.has(sessionPath)) {
+  const sessionId = resolveSessionIdForPath(engine, sessionPath);
+  const submissionKey = sessionId || sessionPath;
+  if (pendingDesktopSessionSubmissions.has(submissionKey)) {
     throw new Error("session_busy");
   }
   if (typeof engine.isSessionStreaming === "function" && engine.isSessionStreaming(sessionPath)) {
     throw new Error("session_busy");
   }
 
-  pendingDesktopSessionSubmissions.add(sessionPath);
+  pendingDesktopSessionSubmissions.add(submissionKey);
   try {
     const session = await engine.ensureSessionLoaded(sessionPath);
     if (!session) throw new Error(`desktop-session-submit: failed to load session ${sessionPath}`);
+    session.aborted = false;
 
     if (uiContext !== undefined) {
       engine.setUiContext?.(sessionPath, uiContext ?? null);
@@ -131,7 +134,7 @@ export async function submitDesktopSessionMessage(engine: any, opts: {
     let promptAudioAttachmentPaths = audioAttachmentPaths || [];
     let displayAttachments = displayMessage?.attachments;
     let promptText = text || "";
-    let promptSessionFileRefs = normalizeSessionFileRefs(sessionFileRefs, sessionPath);
+    let promptSessionFileRefs = normalizeSessionFileRefs(sessionFileRefs, sessionPath, sessionId);
 
     if (displayAttachments?.length) {
       const registeredDisplay = registerDisplayAttachments({
@@ -157,13 +160,14 @@ export async function submitDesktopSessionMessage(engine: any, opts: {
       }
       promptSessionFileRefs = mergeSessionFileRefs(
         promptSessionFileRefs,
-        sessionFileRefsFromAttachments(displayAttachments, sessionPath),
+        sessionFileRefsFromAttachments(displayAttachments, sessionPath, sessionId),
       );
     }
 
     if (inboundFiles?.length) {
       const materialized = await materializeBridgeInboundFiles({
         hanakoHome: engine.hanakoHome,
+        sessionId,
         sessionPath,
         files: inboundFiles,
         registerSessionFile: engine.registerSessionFile?.bind(engine),
@@ -179,7 +183,7 @@ export async function submitDesktopSessionMessage(engine: any, opts: {
       ];
       promptSessionFileRefs = mergeSessionFileRefs(
         promptSessionFileRefs,
-        sessionFileRefsFromAttachments(materialized.displayAttachments, sessionPath),
+        sessionFileRefsFromAttachments(materialized.displayAttachments, sessionPath, sessionId),
       );
     }
 
@@ -234,6 +238,45 @@ export async function submitDesktopSessionMessage(engine: any, opts: {
       }
     });
 
+    // Auto-Pilot /goal 自動迴圈與 System Prompt 約束注入
+    const promptTrim = promptText.trim();
+    if (promptTrim.startsWith("/goal!")) {
+      promptText = promptText.replace(/^\/goal!/, "/goal");
+    }
+
+    const isAutoPilot = !!context?.autoPilot || promptTrim.startsWith("/goal");
+    let autoPilotMode = context?.autoPilotMode || "interactive";
+
+    if (promptTrim.startsWith("/goal!") || promptTrim.includes("--yes") || promptTrim.includes("-y")) {
+      autoPilotMode = "full";
+    }
+
+    if (isAutoPilot) {
+      const isFull = autoPilotMode === "full";
+      
+      const autoPilotRules = isFull ? `
+[SYSTEM CONTRACT: AUTO-PILOT MODE (FULL AUTONOMY)]
+你目前正處於「完全自主執行模式（Full Autopilot Mode）」。你必須遵守以下最高指令限制，不得違背：
+1. 嚴禁提問與確認：你必須自主進行技術決策並直接執行。嚴禁以 any 形式向用戶詢問「是否可以執行某個指令」、「需要選擇哪個方案」或「你是否同意此變更」等確認問題。即使面臨不確定性，你必須利用你擁有的工具自主調研、閱讀文件或搜尋 codebase 以做出最合理的決策。
+2. 拒絕草率與敷衍：你必須以最高工程標準完成任務。在將任何 TODO 標記為 completed 之前，你必須自主執行完整的驗證步驟（包括但不限於：編譯程式碼、跑單元測試、檢查命令的 stdout/stderr 輸出結果）。僅當驗證完全通過、結果正確時，才能更新該 TODO 的狀態為 completed。
+3. 主動更新任務清單：請在每次大步驟的末尾或更新時，主動、精確地更新與記錄當前的 TODO 待辦清單，並依此引導推進你的執行。
+4. 完成訊號：當你確認所有任務都已完成並驗證通過時，必須在回覆的最末尾加上 [GOAL_COMPLETED] 標記。這是 Orchestrator 判斷是否停止循環的唯一依據。如果你還有未完成的工作，不要加上這個標記。`
+      : `
+[SYSTEM CONTRACT: AUTO-PILOT MODE (INTERACTIVE CONSTRAINTS)]
+你目前正處於「互動參考模式（Interactive Autopilot Mode）」。你必須遵守以下最高指令限制：
+1. 主動參考與確認：在開始執行或面臨多個架閣選擇、破壞性變更時，你應該主動提出可能的方案並詢問使用者意見，並將其作為執行約束，而不是完全蒙眼狂奔。
+2. 自主推進與 TODO 管理：雖然在關鍵決策時需要參考使用者意見，但一旦方向確定，你仍應自主執行實作。在將 TODO 標記為 completed 之前，你依然必須自主執行驗證，並精確更新 TODO 清單。
+3. 完成訊號：當你確認所有任務都已完成時，必須在回覆的最末尾加上 [GOAL_COMPLETED] 標記。如果你需要用戶確認後才能繼續，不要加上完成標記，而是清楚描述你需要什麼確認。`;
+
+      const basePrompt = context?.systemPrompt || session.agent?.state?.systemPrompt || session.systemPrompt || "";
+      context = {
+        ...context,
+        autoPilot: true,
+        autoPilotMode,
+        systemPrompt: basePrompt + "\n" + autoPilotRules,
+      };
+    }
+
     try {
       const promptOpts = buildPromptOptions({
         images,
@@ -245,6 +288,53 @@ export async function submitDesktopSessionMessage(engine: any, opts: {
         context,
       });
       await engine.promptSession(sessionPath, promptText, promptOpts);
+
+      if (isAutoPilot) {
+        const MAX_AUTO_PILOT_TURNS = 25;  // 安全上限
+        let turnCount = 1;  // 首次 promptSession 已執行，計為第 1 次
+
+        while (turnCount < MAX_AUTO_PILOT_TURNS) {
+          // 1. 檢查終止條件
+          if (session.aborted) {
+            console.log(`[auto-pilot] Orchestrator: 偵測到用戶中斷訊號, 停止循環 (turn ${turnCount})`);
+            break;
+          }
+          const shouldStop = detectAutoPilotCompletion(captured);
+          if (shouldStop) {
+            console.log(`[auto-pilot] Orchestrator: 偵測到完成訊號, 停止循環 (turn ${turnCount})`);
+            break;
+          }
+
+          // 2. 延遲以讓 UI 更新
+          await delay(1500);
+
+          // 延遲後再次檢查中斷
+          if (session.aborted) {
+            console.log(`[auto-pilot] Orchestrator: 偵測到用戶中斷訊號, 停止循環 (turn ${turnCount})`);
+            break;
+          }
+
+          // 3. 重置 captured text 以追蹤本輪回覆
+          captured = "";
+          turnCount++;
+
+          // 4. 執行下一輪 prompt
+          console.log(`[auto-pilot] Orchestrator: 推進第 ${turnCount} 輪 (${sessionPath})`);
+          
+          try {
+            const nextPrompt = buildAutoPilotContinuePrompt(turnCount, autoPilotMode);
+            const nextOpts = buildPromptOptions({ context });
+            await engine.promptSession(sessionPath, nextPrompt, nextOpts);
+          } catch (err) {
+            console.error(`[auto-pilot] Orchestrator: 第 ${turnCount} 輪出錯:`, err);
+            break;
+          }
+        }
+
+        if (turnCount >= MAX_AUTO_PILOT_TURNS) {
+          console.warn(`[auto-pilot] Orchestrator: 到達最大輪次上限 (${MAX_AUTO_PILOT_TURNS})`);
+        }
+      }
     } finally {
       try { unsub?.(); } catch {}
       engine.emitEvent?.({ type: "session_status", isStreaming: false }, sessionPath);
@@ -255,7 +345,7 @@ export async function submitDesktopSessionMessage(engine: any, opts: {
       toolMedia,
     };
   } finally {
-    pendingDesktopSessionSubmissions.delete(sessionPath);
+    pendingDesktopSessionSubmissions.delete(submissionKey);
   }
 }
 
@@ -271,7 +361,7 @@ export async function submitDesktopSessionInterjection(engine: any, opts: {
   inboundFiles?: Array<{ type: string; filename?: string; mimeType?: string; buffer: any }>;
   clientMessageId?: string;
   displayMessage?: any;
-  sessionFileRefs?: Array<{ fileId?: string; sessionPath?: string; label?: string; kind?: string }>;
+  sessionFileRefs?: Array<{ fileId?: string; sessionId?: string; sessionPath?: string; label?: string; kind?: string }>;
   uiContext?: any;
   context?: any;
 } = {}) {
@@ -306,6 +396,7 @@ export async function submitDesktopSessionInterjection(engine: any, opts: {
   if (!session) {
     throw new Error(`desktop-session-submit: failed to load session ${sessionPath}`);
   }
+  const sessionId = resolveSessionIdForPath(engine, sessionPath);
 
   if (uiContext !== undefined) {
     engine.setUiContext?.(sessionPath, uiContext ?? null);
@@ -316,7 +407,7 @@ export async function submitDesktopSessionInterjection(engine: any, opts: {
   let promptAudioAttachmentPaths = audioAttachmentPaths || [];
   let displayAttachments = displayMessage?.attachments;
   let promptText = text || "";
-  let promptSessionFileRefs = normalizeSessionFileRefs(sessionFileRefs, sessionPath);
+  let promptSessionFileRefs = normalizeSessionFileRefs(sessionFileRefs, sessionPath, sessionId);
 
   if (displayAttachments?.length) {
     const registeredDisplay = registerDisplayAttachments({
@@ -342,13 +433,14 @@ export async function submitDesktopSessionInterjection(engine: any, opts: {
     }
     promptSessionFileRefs = mergeSessionFileRefs(
       promptSessionFileRefs,
-      sessionFileRefsFromAttachments(displayAttachments, sessionPath),
+      sessionFileRefsFromAttachments(displayAttachments, sessionPath, sessionId),
     );
   }
 
   if (inboundFiles?.length) {
     const materialized = await materializeBridgeInboundFiles({
       hanakoHome: engine.hanakoHome,
+      sessionId,
       sessionPath,
       files: inboundFiles,
       registerSessionFile: engine.registerSessionFile?.bind(engine),
@@ -363,7 +455,7 @@ export async function submitDesktopSessionInterjection(engine: any, opts: {
     ];
     promptSessionFileRefs = mergeSessionFileRefs(
       promptSessionFileRefs,
-      sessionFileRefsFromAttachments(materialized.displayAttachments, sessionPath),
+      sessionFileRefsFromAttachments(materialized.displayAttachments, sessionPath, sessionId),
     );
   }
 
@@ -554,16 +646,34 @@ function uniquePaths(paths: string[]): string[] {
   return Array.from(new Set((paths || []).filter(Boolean)));
 }
 
-function normalizeSessionFileRefs(refs, fallbackSessionPath) {
+function resolveSessionIdForPath(engine, sessionPath) {
+  try {
+    const sessionId = engine?.getSessionIdForPath?.(sessionPath);
+    return typeof sessionId === "string" && sessionId.trim() ? sessionId.trim() : null;
+  } catch {
+    return null;
+  }
+}
+
+function normalizeSessionFileRefs(refs, fallbackSessionPath, fallbackSessionId = null) {
   if (!Array.isArray(refs)) return [];
   const normalized = [];
+  const seen = new Set();
   for (const ref of refs) {
     if (!ref || typeof ref !== "object") continue;
     const fileId = typeof ref.fileId === "string" && ref.fileId.trim() ? ref.fileId.trim() : null;
     if (!fileId) continue;
+    const sessionId = typeof ref.sessionId === "string" && ref.sessionId.trim()
+      ? ref.sessionId.trim()
+      : fallbackSessionId;
+    const sessionPath = typeof ref.sessionPath === "string" && ref.sessionPath ? ref.sessionPath : fallbackSessionPath;
+    const dedupeKey = `${sessionId || sessionPath || ""}:${fileId}`;
+    if (seen.has(dedupeKey)) continue;
+    seen.add(dedupeKey);
     normalized.push({
       fileId,
-      sessionPath: typeof ref.sessionPath === "string" && ref.sessionPath ? ref.sessionPath : fallbackSessionPath,
+      ...(sessionId ? { sessionId } : {}),
+      sessionPath,
       label: typeof ref.label === "string" && ref.label ? ref.label : fileId,
       kind: typeof ref.kind === "string" && ref.kind ? ref.kind : "attachment",
     });
@@ -571,13 +681,14 @@ function normalizeSessionFileRefs(refs, fallbackSessionPath) {
   return normalized;
 }
 
-function sessionFileRefsFromAttachments(attachments, sessionPath) {
+function sessionFileRefsFromAttachments(attachments, sessionPath, sessionId = null) {
   return normalizeSessionFileRefs((attachments || []).map((attachment) => ({
     fileId: attachment?.fileId,
+    sessionId: attachment?.sessionId || sessionId,
     sessionPath,
     label: attachment?.name || attachment?.label || attachment?.path,
     kind: attachment?.isDir ? "directory" : "attachment",
-  })), sessionPath);
+  })), sessionPath, sessionId);
 }
 
 function mergeSessionFileRefs(primary, secondary) {
@@ -585,7 +696,7 @@ function mergeSessionFileRefs(primary, secondary) {
   const seen = new Set();
   for (const ref of [...(primary || []), ...(secondary || [])]) {
     if (!ref?.fileId) continue;
-    const key = `${ref.sessionPath || ""}:${ref.fileId}`;
+    const key = `${ref.sessionId || ref.sessionPath || ""}:${ref.fileId}`;
     if (seen.has(key)) continue;
     seen.add(key);
     out.push(ref);
@@ -600,10 +711,55 @@ function addSessionFileRefMarkers(text, refs) {
     .map((ref) => `[SessionFile] ${JSON.stringify({
       fileId: ref.fileId,
       sessionPath: ref.sessionPath || null,
+      ...(ref.sessionId ? { sessionId: ref.sessionId } : {}),
       label: ref.label,
       kind: ref.kind,
     })}`)
     .join("\n");
   const promptText = text || "";
   return promptText ? `${markerText}\n${promptText}` : markerText;
+}
+
+/**
+ * 偵測模型回覆中是否包含任務完成訊號。
+ */
+function detectAutoPilotCompletion(capturedText: string): boolean {
+  const text = (capturedText || "").trim();
+  
+  // 空回覆視為異常終止
+  if (!text || text.length < 10) return true;
+  
+  // 顯式完成標記
+  const COMPLETION_MARKERS = [
+    "[GOAL_COMPLETED]",
+    "[ALL_TASKS_COMPLETED]",
+    "[AUTO_PILOT_DONE]",
+  ];
+  for (const marker of COMPLETION_MARKERS) {
+    if (text.includes(marker)) return true;
+  }
+  
+  return false;
+}
+
+/**
+ * 構建自動推進的系統提示
+ */
+function buildAutoPilotContinuePrompt(turnCount: number, mode: string): string {
+  const isFull = mode === "full";
+  return [
+    `[System: Auto-Pilot Mode — Turn ${turnCount}]`,
+    isFull
+      ? "請繼續自主推進任務。如果所有工作都已完成，在回覆末尾加上 [GOAL_COMPLETED] 標記。"
+      : "請繼續推進任務。如果需要用戶確認重大決策請說明，如果所有工作都已完成，在回覆末尾加上 [GOAL_COMPLETED] 標記。",
+    "",
+    "規則：",
+    "- 如果有待辦事項尚未完成，繼續執行下一個步驟",
+    "- 如果所有任務均已完成並驗證通過，回覆末尾必須包含 [GOAL_COMPLETED]",
+    "- 不要重複已經完成的工作",
+  ].join("\n");
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
 }

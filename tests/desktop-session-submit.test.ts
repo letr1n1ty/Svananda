@@ -49,8 +49,14 @@ function makeFakeSession({ replyText = "desktop reply", toolMedia = [], toolMedi
   };
 }
 
-function sessionFileMarker({ fileId, sessionPath, label, kind = "attachment" }) {
-  return `[SessionFile] ${JSON.stringify({ fileId, sessionPath, label, kind })}`;
+function sessionFileMarker({ fileId, sessionPath, sessionId = undefined, label, kind = "attachment" }) {
+  return `[SessionFile] ${JSON.stringify({
+    fileId,
+    sessionPath,
+    ...(sessionId ? { sessionId } : {}),
+    label,
+    kind,
+  })}`;
 }
 
 describe("submitDesktopSessionMessage", () => {
@@ -84,6 +90,42 @@ describe("submitDesktopSessionMessage", () => {
       expect.objectContaining({ type: "session_status", isStreaming: true }),
       "/tmp/desk.jsonl",
     );
+  });
+
+  it("rejects concurrent submissions for moved paths with the same session id", async () => {
+    const session = makeFakeSession();
+    const ready = (Promise as any).withResolvers();
+    const originalPath = "/tmp/original-desk.jsonl";
+    const movedPath = "/tmp/archived/renamed-desk.jsonl";
+    const sessionId = "sess_desktop_submit";
+    const engine = {
+      getSessionIdForPath: vi.fn((sessionPath) => (
+        sessionPath === originalPath || sessionPath === movedPath ? sessionId : null
+      )),
+      ensureSessionLoaded: vi.fn((sessionPath) => (
+        sessionPath === originalPath ? ready.promise : Promise.resolve(session)
+      )),
+      promptSession: vi.fn(async (sessionPath, text, opts) => session.prompt(text, opts)),
+      emitEvent: vi.fn(),
+      setUiContext: vi.fn(),
+      isSessionStreaming: vi.fn(() => false),
+    };
+
+    const first = submitDesktopSessionMessage(engine, {
+      sessionPath: originalPath,
+      text: "first",
+      displayMessage: { text: "first" },
+    });
+    await Promise.resolve();
+
+    await expect(submitDesktopSessionMessage(engine, {
+      sessionPath: movedPath,
+      text: "second",
+      displayMessage: { text: "second" },
+    })).rejects.toThrow("session_busy");
+
+    ready.resolve(session);
+    await expect(first).resolves.toMatchObject({ text: "desktop reply" });
   });
 
   it("emits a session-scoped user message, toggles streaming status, and returns captured assistant output", async () => {
@@ -132,6 +174,50 @@ describe("submitDesktopSessionMessage", () => {
       text: "desktop reply",
       toolMedia: [{ type: "remote_url", url: "https://example.com/a.png" }],
     });
+  });
+
+  it("deduplicates SessionFile refs by stable sessionId when it is available", async () => {
+    const session = makeFakeSession();
+    const engine = {
+      getSessionIdForPath: vi.fn(() => "sess_submit_stable"),
+      ensureSessionLoaded: vi.fn(async () => session),
+      promptSession: vi.fn(async (sessionPath, text, opts) => session.prompt(text, opts)),
+      emitEvent: vi.fn(),
+      setUiContext: vi.fn(),
+    };
+
+    await submitDesktopSessionMessage(engine, {
+      sessionPath: "/tmp/desk.jsonl",
+      text: "open it",
+      displayMessage: { text: "open it" },
+      sessionFileRefs: [
+        {
+          fileId: "sf_note",
+          sessionId: "sess_submit_stable",
+          sessionPath: "/tmp/old-location.jsonl",
+          label: "old note",
+          kind: "attachment",
+        },
+        {
+          fileId: "sf_note",
+          sessionId: "sess_submit_stable",
+          sessionPath: "/tmp/new-location.jsonl",
+          label: "new note",
+          kind: "attachment",
+        },
+      ],
+    });
+
+    expect(engine.promptSession).toHaveBeenCalledWith(
+      "/tmp/desk.jsonl",
+      `${sessionFileMarker({
+        fileId: "sf_note",
+        sessionId: "sess_submit_stable",
+        sessionPath: "/tmp/old-location.jsonl",
+        label: "old note",
+      })}\nopen it`,
+      undefined,
+    );
   });
 
   it("threads clientMessageId into the session user message event", async () => {
@@ -972,5 +1058,104 @@ describe("submitDesktopSessionMessage", () => {
 
     // origin 条目必须在 steer 成功后才写，被拒绝时不能产生孤儿
     expect(appendCustomEntry).not.toHaveBeenCalled();
+  });
+
+  describe("Auto-Pilot (/goal) Orchestrator loop", () => {
+    it("loops until [GOAL_COMPLETED] is found in output", async () => {
+      const promptCalls: string[] = [];
+      const session = {
+        subscribe: (fn) => {
+          return () => {};
+        },
+        prompt: vi.fn(async (text, opts) => {
+          promptCalls.push(text);
+        }),
+        model: null,
+      };
+
+      let onDeltaCallback: any = null;
+      session.subscribe = (fn) => {
+        onDeltaCallback = fn;
+        return () => {};
+      };
+
+      session.prompt = vi.fn(async (text, opts) => {
+        promptCalls.push(text);
+        if (promptCalls.length === 1) {
+          onDeltaCallback?.({
+            type: "message_update",
+            assistantMessageEvent: { type: "text_delta", delta: "First turn result" }
+          });
+        } else {
+          onDeltaCallback?.({
+            type: "message_update",
+            assistantMessageEvent: { type: "text_delta", delta: "Done! [GOAL_COMPLETED]" }
+          });
+        }
+      });
+
+      const engine = {
+        ensureSessionLoaded: vi.fn(async () => session),
+        promptSession: vi.fn(async (sessionPath, text, opts) => session.prompt(text, opts)),
+        emitEvent: vi.fn(),
+        setUiContext: vi.fn(),
+      };
+
+      const result = await submitDesktopSessionMessage(engine, {
+        sessionPath: "/tmp/desk.jsonl",
+        text: "/goal test task",
+        displayMessage: { text: "/goal test task" },
+      });
+
+      expect(promptCalls).toHaveLength(2);
+      expect(promptCalls[0]).toBe("/goal test task");
+      expect(promptCalls[1]).toContain("[System: Auto-Pilot Mode — Turn 2]");
+      expect(result.text).toContain("[GOAL_COMPLETED]");
+    });
+
+    it("stops looping immediately if session.aborted is set to true during delay", async () => {
+      const promptCalls: string[] = [];
+      const session: any = {
+        subscribe: (fn) => {
+          return () => {};
+        },
+        prompt: vi.fn(async (text, opts) => {
+          promptCalls.push(text);
+        }),
+        model: null,
+      };
+
+      let onDeltaCallback: any = null;
+      session.subscribe = (fn) => {
+        onDeltaCallback = fn;
+        return () => {};
+      };
+
+      session.prompt = vi.fn(async (text, opts) => {
+        promptCalls.push(text);
+        onDeltaCallback?.({
+          type: "message_update",
+          assistantMessageEvent: { type: "text_delta", delta: "First turn result" }
+        });
+        session.aborted = true;
+      });
+
+      const engine = {
+        ensureSessionLoaded: vi.fn(async () => session),
+        promptSession: vi.fn(async (sessionPath, text, opts) => session.prompt(text, opts)),
+        emitEvent: vi.fn(),
+        setUiContext: vi.fn(),
+      };
+
+      const result = await submitDesktopSessionMessage(engine, {
+        sessionPath: "/tmp/desk.jsonl",
+        text: "/goal test task",
+        displayMessage: { text: "/goal test task" },
+      });
+
+      expect(promptCalls).toHaveLength(1);
+      expect(promptCalls[0]).toBe("/goal test task");
+      expect(result.text).toBe("First turn result");
+    });
   });
 });

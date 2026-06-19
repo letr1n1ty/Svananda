@@ -117,7 +117,8 @@ describe('AssistantMessage completion actions', () => {
     );
 
     expect(screen.queryByText('05:43')).not.toBeInTheDocument();
-    expect(screen.queryByTestId('assistant-completion-actions')).not.toBeInTheDocument();
+    // 複製與截圖已整合至 footer，因此舊訊息仍會渲染 footer 容器，但沒有時間戳記與重新生成按鈕
+    expect(screen.getByTestId('assistant-completion-actions')).toBeInTheDocument();
     expect(screen.queryByTitle('重新生成')).not.toBeInTheDocument();
   });
 

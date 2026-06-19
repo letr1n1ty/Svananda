@@ -59,7 +59,7 @@ describe("desktop client single instance lock", () => {
     expect(acquired).toBe(true);
     expect(app.setPath).toHaveBeenCalledWith(
       "userData",
-      path.join("C:", "Users", "me", "AppData", "Roaming", "Hanako"),
+      path.join("C:", "Users", "me", "AppData", "Roaming", "Svananda"),
     );
     expect(app.requestSingleInstanceLock).toHaveBeenCalledTimes(1);
   });

@@ -1,0 +1,83 @@
+/* OpenCode Catppuccin Macchiato Dark theme port for OpenHanako */
+[data-theme="opencode-catppuccin-macchiato-dark"] {
+  /* OpenCode palette */
+  --opencode-neutral: #24273a;
+  --opencode-ink: #cad3f5;
+  --opencode-primary: #8aadf4;
+  --opencode-accent: #f5bde6;
+  --opencode-success: #a6da95;
+  --opencode-warning: #eed49f;
+  --opencode-error: #ed8796;
+  --opencode-info: #8bd5ca;
+  --opencode-diff-add: #a6da95;
+  --opencode-diff-delete: #ed8796;
+  --opencode-text-weak: #b8c0e0;
+
+  /* Base surfaces */
+  --bg: #24273a;
+  --bg-card: #2c2f41;
+  --bg-glass: rgba(36, 39, 58, 0.92);
+  --sidebar-bg: #282b3d;
+
+  /* Text */
+  --text: #cad3f5;
+  --text-light: #a8b0cf;
+  --text-muted: #b8c0e0;
+  --hana-text: #cad3f5;
+
+  /* Brand / interaction */
+  --accent: #8aadf4;
+  --accent-hover: #9bb9f5;
+  --accent-light: rgba(138, 173, 244, 0.16);
+  --accent-rgb: 138, 173, 244;
+  --link: #8aadf4;
+
+  /* Secondary accent */
+  --coral: #f5bde6;
+  --coral-rgb: 245, 189, 230;
+
+  /* State colors */
+  --green: #a6da95;
+  --green-rgb: 166, 218, 149;
+  --danger: #ed8796;
+  --danger-rgb: 237, 135, 150;
+
+  /* Borders / shadows */
+  --border: rgba(202, 211, 245, 0.14);
+  --shadow: 0 18px 40px rgba(0, 0, 0, 0.45);
+
+  /* Common overlays */
+  --overlay-subtle: rgba(202, 211, 245, 0.04);
+  --overlay-light: rgba(202, 211, 245, 0.08);
+  --overlay-medium: rgba(202, 211, 245, 0.14);
+  --overlay-strong: rgba(202, 211, 245, 0.22);
+
+  /* Chat bubbles / notes */
+  --user-bg: rgba(138, 173, 244, 0.14);
+  --jian-note-bg: rgba(245, 189, 230, 0.12);
+  --jian-note-border: rgba(245, 189, 230, 0.28);
+
+  /* Mood / tool chips */
+  --mood-bg: rgba(139, 213, 202, 0.12);
+  --mood-text: #8bd5ca;
+  --mood-border: rgba(139, 213, 202, 0.28);
+
+  --tool-bg: rgba(138, 173, 244, 0.12);
+  --tool-text: #8aadf4;
+
+  /* Attach / drag-drop */
+  --drop-overlay-bg: rgba(36, 39, 58, 0.72);
+  --attach-bg: rgba(202, 211, 245, 0.06);
+
+  /* Permission / warnings */
+  --permission-auto: #eed49f;
+  --permission-request: #8aadf4;
+
+  /* Tabs */
+  --tab-slider-bg: rgba(138, 173, 244, 0.22);
+  --tab-slider-shadow: 0 8px 18px rgba(138, 173, 244, 0.18);
+
+  --select-arrow: none;
+
+  color-scheme: dark;
+}

@@ -4,13 +4,16 @@
     <meta charset="UTF-8">
     <meta http-equiv="Content-Security-Policy"
           content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' file:;">
-    <title>HanaAgent</title>
+    <title>Svananda</title>
+    <link rel="stylesheet" href="themes/warm-paper.css" id="themeSheet">
     <style>
         *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
         html, body { height: 100%; overflow: hidden; }
         body {
             font-family: 'Songti SC', 'Georgia', serif;
-            background: #F4F0E4;
+            background: var(--bg);
+            background-image: var(--bg-texture);
+            background-attachment: fixed;
             border-radius: 12px;
             display: flex;
             align-items: center;
@@ -42,7 +45,7 @@
         }
         .splash-text {
             font-size: 0.82rem;
-            color: #8E9196;
+            color: var(--text-muted);
             letter-spacing: 0.02em;
             line-height: 1.5;
             transition: opacity 0.5s ease;
@@ -63,6 +66,7 @@
 </head>
 <body>
     <div id="react-root"></div>
+    <script src="lib/theme.js"></script>
     <script src="modules/platform.js"></script>
     <script type="module" src="./splash-main.tsx"></script>
 </body>

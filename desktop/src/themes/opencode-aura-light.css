@@ -1,0 +1,83 @@
+/* OpenCode Aura Light theme port for OpenHanako */
+[data-theme="opencode-aura-light"] {
+  /* OpenCode palette */
+  --opencode-neutral: #f5f0ff;
+  --opencode-ink: #2d2640;
+  --opencode-primary: #a277ff;
+  --opencode-accent: #d94f4f;
+  --opencode-success: #40bf7a;
+  --opencode-warning: #d9a24a;
+  --opencode-error: #d94f4f;
+  --opencode-info: #5bb8d9;
+  --opencode-diff-add: #b3e6cc;
+  --opencode-diff-delete: #f5b3b3;
+  --opencode-text-weak: #8a8a8a;
+
+  /* Base surfaces */
+  --bg: #f5f0ff;
+  --bg-card: #ede8f7;
+  --bg-glass: rgba(245, 240, 255, 0.92);
+  --sidebar-bg: #e8e4f2;
+
+  /* Text */
+  --text: #2d2640;
+  --text-light: #554e66;
+  --text-muted: #8a8a8a;
+  --hana-text: #2d2640;
+
+  /* Brand / interaction */
+  --accent: #a277ff;
+  --accent-hover: #916be5;
+  --accent-light: rgba(162, 119, 255, 0.12);
+  --accent-rgb: 162, 119, 255;
+  --link: #a277ff;
+
+  /* Secondary accent */
+  --coral: #d94f4f;
+  --coral-rgb: 217, 79, 79;
+
+  /* State colors */
+  --green: #40bf7a;
+  --green-rgb: 64, 191, 122;
+  --danger: #d94f4f;
+  --danger-rgb: 217, 79, 79;
+
+  /* Borders / shadows */
+  --border: rgba(45, 38, 64, 0.14);
+  --shadow: 0 18px 40px rgba(0, 0, 0, 0.12);
+
+  /* Common overlays */
+  --overlay-subtle: rgba(45, 38, 64, 0.035);
+  --overlay-light: rgba(45, 38, 64, 0.07);
+  --overlay-medium: rgba(45, 38, 64, 0.12);
+  --overlay-strong: rgba(45, 38, 64, 0.2);
+
+  /* Chat bubbles / notes */
+  --user-bg: rgba(162, 119, 255, 0.1);
+  --jian-note-bg: rgba(217, 79, 79, 0.1);
+  --jian-note-border: rgba(217, 79, 79, 0.24);
+
+  /* Mood / tool chips */
+  --mood-bg: rgba(91, 184, 217, 0.1);
+  --mood-text: #5bb8d9;
+  --mood-border: rgba(91, 184, 217, 0.24);
+
+  --tool-bg: rgba(162, 119, 255, 0.1);
+  --tool-text: #a277ff;
+
+  /* Attach / drag-drop */
+  --drop-overlay-bg: rgba(245, 240, 255, 0.72);
+  --attach-bg: rgba(45, 38, 64, 0.045);
+
+  /* Permission / warnings */
+  --permission-auto: #d9a24a;
+  --permission-request: #a277ff;
+
+  /* Tabs */
+  --tab-slider-bg: rgba(162, 119, 255, 0.14);
+  --tab-slider-shadow: 0 8px 18px rgba(162, 119, 255, 0.12);
+
+  --select-arrow: none;
+
+  color-scheme: light;
+}
