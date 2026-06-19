@@ -2186,7 +2186,14 @@ describe("migration #20: Pi model input schema compatibility", () => {
     const { AuthStorage, createModelRegistry } = await import("../lib/pi-sdk/index.ts");
     const registry = createModelRegistry(new (AuthStorage as any)(tmpDir), modelsJsonPath);
     const available = await registry.getAvailable();
-    expect(available.map((model) => model.id)).toEqual(["qwen3-vl-plus", "qwen-plus", "custom-video"]);
+    // Pi SDK 升級後 getAvailable() 也包含 built-in models，
+    // 改為驗證 dashscope 自訂模型的 id 都包含在列表中
+    const dashscopeIds = available
+      .filter((m) => m.provider === "dashscope")
+      .map((m) => m.id);
+    expect(dashscopeIds).toContain("qwen3-vl-plus");
+    expect(dashscopeIds).toContain("qwen-plus");
+    expect(dashscopeIds).toContain("custom-video");
     expect(prefs.getPreferences()._dataVersion).toBe(LATEST_DATA_VERSION);
   });
 });

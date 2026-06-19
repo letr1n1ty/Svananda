@@ -78,10 +78,11 @@ const EDITOR_FONT_SIZE_ROWS: Array<{
   { key: 'heading3FontSize', label: 'settings.editor.markdownHeading3FontSize', hint: 'settings.editor.markdownHeading3FontSizeHint', min: 14, max: 30 },
 ];
 
-const BUILTIN_STYLED_THEMES = new Set([
-  'warm-paper', 'midnight', 'high-contrast', 'grass-aroma', 
-  'contemplation', 'absolutely', 'delve', 'deep-think', 
-  'new-warm-paper', 'midnight-contrast', 'auto'
+// 「內建樣式」主題：ID 不含 opencode- 前綴的原始主題，以及 auto 選項
+// 這些主題背景由 CSS 定義，無需 registry backgroundColor hex 色塊
+const BUILTIN_STYLED_THEMES = new Set<string>([
+  ...registry.getThemeIds().filter((id: string) => !id.startsWith('opencode-')),
+  'auto',
 ]);
 
 function getContrastColor(hexColor?: string): string {

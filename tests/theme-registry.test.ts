@@ -45,16 +45,22 @@ describe('theme-registry', () => {
   });
 
   describe('THEMES 完整性', () => {
-    it('恰好 10 条', () => {
-      expect(Object.keys(reg.THEMES)).toHaveLength(10);
+    // 原始 10 個自訂主題（上游合併後主題總數大幅增加，但這些必須保留）
+    const ORIGINAL_THEMES = [
+      'absolutely', 'contemplation', 'deep-think',
+      'delve', 'grass-aroma', 'high-contrast', 'midnight', 'midnight-contrast',
+      'new-warm-paper', 'warm-paper',
+    ];
+
+    it('至少含 10 個原始自訂主題', () => {
+      expect(Object.keys(reg.THEMES).length).toBeGreaterThanOrEqual(10);
     });
 
-    it('包含所有已知主题 id', () => {
-      expect(Object.keys(reg.THEMES).sort()).toEqual([
-        'absolutely', 'contemplation', 'deep-think',
-        'delve', 'grass-aroma', 'high-contrast', 'midnight', 'midnight-contrast',
-        'new-warm-paper', 'warm-paper',
-      ]);
+    it('包含所有原始自訂主題 id', () => {
+      const ids = Object.keys(reg.THEMES);
+      for (const id of ORIGINAL_THEMES) {
+        expect(ids, `缺少原始主題: ${id}`).toContain(id);
+      }
     });
 
     it.each(['warm-paper', 'midnight', 'high-contrast', 'grass-aroma',
@@ -155,9 +161,11 @@ describe('theme-registry', () => {
       expect(reg.getThemeIds().sort()).toEqual(Object.keys(reg.THEMES).sort());
     });
 
-    it('getAllUIOptions 含 10 个主题 + auto', () => {
+    it('getAllUIOptions 含所有主题 + auto', () => {
       const opts = reg.getAllUIOptions();
-      expect(opts).toHaveLength(11);
+      // 上游合併後主題數量動態成長，這裡驗證結構而非硬編碼數量
+      const themeCount = reg.getThemeIds().length;
+      expect(opts).toHaveLength(themeCount + 1); // themes + auto option
       expect(opts.map(o => o.id).sort()).toContain('auto');
       expect(opts.map(o => o.id).sort()).toContain('warm-paper');
       opts.forEach(o => {

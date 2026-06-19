@@ -739,7 +739,6 @@ export function handleServerMessage(msg: any): void {
         break;
       }
       useStore.getState().appendItem(sp, { type: 'message', data });
->>>>>>> upstream/main
       bumpMessageLiveVersion(sp);
       if (sp === useStore.getState().currentSessionPath) {
         useStore.setState({ welcomeVisible: false });

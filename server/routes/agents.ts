@@ -407,7 +407,7 @@ export function createAgentsRoute(engine) {
       try {
         config = YAML.load(await fs.readFile(configPath, "utf-8")) || {};
       } catch (yamlErr) {
-        log.error(`GET /agents/${id}/config: failed to parse config.yaml, using empty configuration:`, yamlErr);
+        log.error(`GET /agents/${id}/config: failed to parse config.yaml, using empty configuration: ` + yamlErr);
         config = {};
       }
 
@@ -547,12 +547,12 @@ export function createAgentsRoute(engine) {
       for (const blockName of ["api", "embedding_api", "utility_api"]) {
         const block = agentPartial[blockName];
         if (hasInlineProviderCredentialPatch(block)) {
-          let agentCfg = {};
+          let agentCfg: any = {};
           try {
             const cfgPath = path.join(agentDir(engine, id), "config.yaml");
             agentCfg = YAML.load(fsSync.readFileSync(cfgPath, "utf-8")) || {};
           } catch (yamlErr) {
-            log.error(`PUT /agents/${id}/config: failed to parse config.yaml:`, yamlErr);
+            log.error(`PUT /agents/${id}/config: failed to parse config.yaml: ${yamlErr}`);
           }
           const { provider: provName, update: provUpdate } = buildInlineProviderCredentialUpdate(
             block,
@@ -641,7 +641,7 @@ export function createAgentsRoute(engine) {
         try {
           yamlData = require("js-yaml").load(await fs.readFile(yamlPath, "utf-8")) as any;
         } catch (yamlErr) {
-          log.error(`GET /agents/${id}/identity: failed to parse svananda.yaml:`, yamlErr);
+          log.error(`GET /agents/${id}/identity: failed to parse svananda.yaml: ` + yamlErr);
         }
         if (yamlData && yamlData.identity) {
           return c.json({ content: yamlData.identity });
@@ -671,11 +671,11 @@ export function createAgentsRoute(engine) {
       const yamlPath = path.join(agentDir(engine, id), "svananda.yaml");
       if (fsSync.existsSync(yamlPath)) {
         const yamlModule = require("js-yaml");
-        let yamlData = {};
+        let yamlData: any = {};
         try {
           yamlData = yamlModule.load(await fs.readFile(yamlPath, "utf-8")) || {} as any;
         } catch (yamlErr) {
-          log.error(`PUT /agents/${id}/identity: failed to parse svananda.yaml:`, yamlErr);
+          log.error(`PUT /agents/${id}/identity: failed to parse svananda.yaml: ` + yamlErr);
         }
         yamlData.identity = content;
         await fs.writeFile(yamlPath, yamlModule.dump(yamlData), "utf-8");
@@ -708,7 +708,7 @@ export function createAgentsRoute(engine) {
         try {
           yamlData = require("js-yaml").load(await fs.readFile(yamlPath, "utf-8")) as any;
         } catch (yamlErr) {
-          log.error(`GET /agents/${id}/ishiki: failed to parse svananda.yaml:`, yamlErr);
+          log.error(`GET /agents/${id}/ishiki: failed to parse svananda.yaml: ` + yamlErr);
         }
         if (yamlData && yamlData.consciousness) {
           return c.json({ content: yamlData.consciousness });
@@ -738,11 +738,11 @@ export function createAgentsRoute(engine) {
       const yamlPath = path.join(agentDir(engine, id), "svananda.yaml");
       if (fsSync.existsSync(yamlPath)) {
         const yamlModule = require("js-yaml");
-        let yamlData = {};
+        let yamlData: any = {};
         try {
           yamlData = yamlModule.load(await fs.readFile(yamlPath, "utf-8")) || {} as any;
         } catch (yamlErr) {
-          log.error(`PUT /agents/${id}/ishiki: failed to parse svananda.yaml:`, yamlErr);
+          log.error(`PUT /agents/${id}/ishiki: failed to parse svananda.yaml: ` + yamlErr);
         }
         yamlData.consciousness = content;
         await fs.writeFile(yamlPath, yamlModule.dump(yamlData), "utf-8");

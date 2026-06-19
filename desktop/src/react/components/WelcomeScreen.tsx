@@ -414,14 +414,14 @@ function FolderHistory({ agentHomeFolders, selectedFolder, selectedWorkspaceMoun
                 onPointerDown={(e) => {
                   e.stopPropagation();
                   e.preventDefault();
-                  onRemoveStudioWorkspace(workspace.mountId);
                 }}
                 onClick={(e) => {
                   e.stopPropagation();
                   e.preventDefault();
+                  onRemoveStudioWorkspace(workspace.mountId);
                 }}
-                title={t('input.removeWorkspace') || 'Remove Workspace'}
-                aria-label={t('input.removeWorkspace')}
+                title={t('input.removeStudioWorkspace') || 'Remove Workspace'}
+                aria-label={t('input.removeStudioWorkspace')}
               >
                 x
               </button>

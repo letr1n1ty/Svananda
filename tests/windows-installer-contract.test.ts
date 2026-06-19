@@ -141,8 +141,8 @@ describe("Windows NSIS installer contract", () => {
   it("pins the Windows executable name to the current product identity", () => {
     const pkg = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf-8"));
 
-    expect(pkg.build.win.executableName).toBe("HanaAgent");
-    expect(pkg.build.nsis.shortcutName).toBe("HanaAgent");
+    expect(pkg.build.win.executableName).toBe("Svananda");
+    expect(pkg.build.nsis.shortcutName).toBe("Svananda");
   });
 
   it("runs an install surface self-check and writes diagnostics before aborting", () => {

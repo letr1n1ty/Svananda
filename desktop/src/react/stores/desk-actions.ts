@@ -147,27 +147,6 @@ export async function createLocalStudioWorkspaceFromFolder(folder: string): Prom
   }
 }
 
-export async function removeStudioWorkspace(mountId: string): Promise<boolean> {
-  if (!hanaFetch) return false;
-  const normalizedMountId = normalizeMountId(mountId);
-  if (!normalizedMountId || normalizedMountId === 'default') return false;
-  
-  try {
-    const res = await hanaFetch(`/api/studio/workspaces/${encodeURIComponent(normalizedMountId)}`, {
-      method: 'DELETE',
-    });
-    const data = await res.json();
-    if (data.error) throw new Error(String(data.error));
-    
-    useStore.setState((state: any) => ({
-      studioWorkspaces: (state.studioWorkspaces || []).filter((item: StudioWorkspace) => item.mountId !== normalizedMountId),
-    }));
-    return true;
-  } catch (err) {
-    console.error(`[workspace] remove studio workspace ${normalizedMountId} failed:`, err);
-    return false;
-  }
-}
 
 export async function applyStudioWorkspace(workspace: Pick<StudioWorkspace, 'mountId' | 'label'> & Partial<Pick<StudioWorkspace, 'nativeRootPath'>>): Promise<void> {
   const mountId = normalizeMountId(workspace.mountId);

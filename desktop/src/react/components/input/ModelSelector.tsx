@@ -150,30 +150,42 @@ export function ModelSelector({ models, sessionModel, isStreaming = false }: {
     if (m) switchModel(m.id, m.provider);
   }, [grouped, groupKeys, switchModel]);
 
+  const handleTriggerClickCapture = useCallback((e: React.MouseEvent) => {
+    if (isStreaming) {
+      e.stopPropagation();
+      e.preventDefault();
+      useStore.getState().addToast(t('model.switchWhileStreaming'), 'warning', 4000, {
+        dedupeKey: 'model-switch-streaming',
+      });
+    }
+  }, [isStreaming, t]);
+
   return (
-    <SelectWidget
-      className={styles['model-selector']}
-      options={options}
-      value={currentValue}
-      onChange={handleSelect}
-      disabled={loading}
-      placement="top"
-      align="end"
-      offset={4}
-      popupMinWidth={180}
-      popupClassName={selectWidgetStyles.providerInset}
-      triggerBare
-      triggerClassName={`${styles['model-pill']}${loading ? ` ${styles['model-pill-disabled']}` : ''}`}
-      renderTrigger={() => (
-        <>
-          {current?.provider && (
-            <ProviderIcon provider={current.provider} className={styles['model-provider-icon']} />
-          )}
-          <span className={styles['model-pill-label']}>{label}</span>
-          <span className={styles['model-arrow']}>▾</span>
-        </>
-      )}
-      renderGroupHeader={(g) => <ProviderGroupHeader provider={g} />}
-    />
+    <div onClickCapture={handleTriggerClickCapture}>
+      <SelectWidget
+        className={styles['model-selector']}
+        options={options}
+        value={currentValue}
+        onChange={handleSelect}
+        disabled={loading}
+        placement="top"
+        align="end"
+        offset={4}
+        popupMinWidth={180}
+        popupClassName={selectWidgetStyles.providerInset}
+        triggerBare
+        triggerClassName={`${styles['model-pill']}${loading ? ` ${styles['model-pill-disabled']}` : ''}`}
+        renderTrigger={() => (
+          <>
+            {current?.provider && (
+              <ProviderIcon provider={current.provider} className={styles['model-provider-icon']} />
+            )}
+            <span className={styles['model-pill-label']}>{label}</span>
+            <span className={styles['model-arrow']}>▾</span>
+          </>
+        )}
+        renderGroupHeader={(g) => <ProviderGroupHeader provider={g} />}
+      />
+    </div>
   );
 }
