@@ -218,7 +218,6 @@ export interface PreviewItem {
   sourceRootPath?: string;
   status?: 'available' | 'expired' | string;
   missingAt?: number | null;
-  fileVersion?: FileVersion | null;
   remoteContentRef?: RemoteContentRef | null;
 }
 
@@ -270,7 +269,7 @@ export interface TodoItem {
 }
 
 // ── 浮动面板类型 ──
-export type ActivePanel = 'activity' | 'automation' | 'bridge' | null;
+export type ActivePanel = 'activity' | 'automation' | 'bridge' | 'ultrawork' | null;
 export type TabType = 'chat' | 'channels' | `plugin:${string}`;
 export type RightWorkspaceTab = 'session-files' | 'workspace' | `plugin-widget:${string}`;
 
@@ -357,127 +356,4 @@ export interface BrowserViewerUpdate {
   sessionPath?: string | null;
   activeTabId?: string | null;
   tabs?: BrowserViewerTab[];
-}
-
-// ── Platform API 类型声明 ──
-export interface PlatformApi {
-  getServerPort(): Promise<string>;
-  getServerToken(): Promise<string>;
-  runEditCommand?(command: 'cut' | 'copy' | 'paste' | 'selectAll'): Promise<boolean>;
-  openSettings(tab?: string): void;
-  openBrowserViewer(url?: string, theme?: string): void;
-  selectFolder(): Promise<string | null>;
-  selectFiles(): Promise<string[]>;
-  selectSkill(): Promise<string | null>;
-  selectPlugin?(): Promise<string | null>;
-  readFile(path: string): Promise<string | null>;
-  writeFile(filePath: string, content: string): Promise<boolean>;
-  writeFileBinary?(filePath: string, base64Data: string): Promise<boolean>;
-  copyFile?(sourcePath: string, destinationPath: string): Promise<boolean>;
-  readFileSnapshot?(path: string): Promise<TextFileSnapshot | null>;
-  writeFileIfUnchanged?(filePath: string, content: string, expectedVersion?: FileVersion | null): Promise<VersionedWriteResult>;
-  watchFile(filePath: string): Promise<boolean>;
-  unwatchFile(filePath: string): Promise<boolean>;
-  onFileChanged(callback: (filePath: string) => void): void;
-  watchWorkspace?(rootPath: string): Promise<boolean>;
-  unwatchWorkspace?(rootPath: string): Promise<boolean>;
-  onWorkspaceChanged?(callback: (payload: WorkspaceChangePayload) => void): void;
-  readFileBase64(path: string): Promise<string | null>;
-  /** 把本地路径转成 <img>/<video> 可用的 file:// URL（同步，纯路径转换）。Web fallback 无此方法，消费侧需运行时判空。 */
-  getFileUrl?(path: string): string;
-  readDocxHtml(path: string): Promise<string | null>;
-  readXlsxHtml(path: string): Promise<string | null>;
-  /** 派生一个只读 Viewer 窗口展示指定文件。返回 windowId（主进程 BrowserWindow.id）。 */
-  spawnViewer(data: { filePath: string; title: string; type: string; language?: string | null }): Promise<number | null>;
-  /** Viewer 窗口接收文件元信息（viewer-window-entry 调用）。 */
-  onViewerLoad?(callback: (data: { filePath: string; title: string; type: string; language?: string | null; windowId: number }) => void): void;
-  /** Viewer 窗口内"关闭"按钮触发。 */
-  viewerClose?(): void;
-  /** 主窗口监听任意 viewer 关闭，payload 是 windowId（用于清理 pinnedViewers store）。 */
-  onViewerClosed?(callback: (windowId: number) => void): void;
-  openFolder(path: string): void;
-  openFile(path: string): void;
-  openExternal(url: string): void;
-  showInFinder(path: string): void;
-  trashItem?(path: string): Promise<boolean>;
-  browserEmergencyStop?(): void;
-  openSkillViewer?(opts: { skillPath?: string; name?: string; baseDir?: string; filePath?: string; installed?: boolean }): void;
-  settingsChanged(event: string, payload?: unknown): void;
-  syncWindowTheme?(theme: string): void;
-  onSettingsChanged(callback: (event: string, payload: unknown) => void): void | (() => void);
-  onOpenSettingsModal?(callback: (tab?: string) => void): void | (() => void);
-  onSwitchTab?(callback: (tab: string) => void): void | (() => void);
-  onServerRestarted?(callback: (data: { port: number; token?: string | null }) => void): void | (() => void);
-  getFilePath?(file: File): string | null;
-  startDrag?(filePaths: string | string[]): void;
-  appReady(): void;
-
-  // ── Window controls (Windows/Linux) ──
-  getPlatform?(): Promise<string>;
-  windowMinimize?(): void;
-  windowMaximize?(): void;
-  windowClose?(): void;
-  windowIsMaximized?(): Promise<boolean>;
-  onMaximizeChange?(callback: (maximized: boolean) => void): void;
-
-  // ── Browser viewer ──
-  updateBrowserViewer?(data: {
-    running?: boolean;
-    url?: string | null;
-    thumbnail?: string | null;
-    thumbnailCapturedAt?: number | null;
-    thumbnailUrl?: string | null;
-    thumbnailFresh?: boolean;
-  }): void;
-  onBrowserUpdate?(callback: (data: BrowserViewerUpdate) => void): void | (() => void);
-  closeBrowserViewer?(): void;
-  closeBrowser?(): void;
-  browserGoBack?(): void;
-  browserGoForward?(): void;
-  browserReload?(): void;
-  browserNewTab?(): void;
-  browserSwitchTab?(tabId: string): void;
-  browserCloseTab?(tabId: string): void;
-
-  // ── Skill viewer (preload) ──
-  listSkillFiles?(baseDir: string): Promise<unknown[]>;
-  readSkillFile?(filePath: string): Promise<string | null>;
-
-  // ── Splash / Onboarding ──
-  getAvatarPath?(role: string): Promise<string | null>;
-  getSplashInfo?(): Promise<{ agentName?: string; locale?: string; yuan?: string } | null>;
-  reloadMainWindow?(): Promise<void>;
-  onboardingComplete?(): Promise<void>;
-
-  // ── Notification ──
-  showNotification?(title: string, body: string, agentId?: string | null, options?: DesktopNotificationOptions): void;
-
-  // ── App info ──
-  getAppVersion?(): Promise<string>;
-  checkUpdate?(): Promise<{ version: string; downloadUrl: string } | null>;
-
-  // ── Auto-update (Windows) ──
-  autoUpdateCheck?(): Promise<string | null>;
-  autoUpdateDownload?(): Promise<boolean>;
-  autoUpdateInstall?(): Promise<boolean>;
-  autoUpdateState?(): Promise<AutoUpdateState>;
-  autoUpdateSetChannel?(channel: 'stable' | 'beta'): Promise<void>;
-  onAutoUpdateState?(callback: (state: AutoUpdateState) => void): (() => void) | void;
-  getAutoLaunchStatus?(): Promise<AutoLaunchStatus>;
-  setAutoLaunchEnabled?(enabled: boolean): Promise<AutoLaunchStatus>;
-  getKeepAwakeStatus?(): Promise<KeepAwakeStatus>;
-  setKeepAwakeEnabled?(enabled: boolean): Promise<KeepAwakeStatus>;
-  quickChatReloadShortcut?(): Promise<{ ok: boolean; shortcut: string; error?: string }>;
-  quickChatShortcutStatus?(): Promise<{ shortcut: string; registered: boolean }>;
-  quickChatShow?(): void;
-  quickChatHide?(): void;
-  quickChatResize?(request: 'compact' | 'chat' | { mode: 'compact' | 'chat'; height?: number }): void;
-  quickChatOpenSession?(sessionPath: string): void;
-  onQuickChatOpenSession?(callback: (payload: { sessionPath?: string }) => void): (() => void) | void;
-  onQuickChatShown?(callback: () => void): (() => void) | void;
-
-  // ── Skill viewer overlay ──
-  onShowSkillViewer?(callback: (data: unknown) => void): void;
-
-  [key: string]: unknown;
 }
