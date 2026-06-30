@@ -9,7 +9,7 @@
   justify-content: space-between;
   width: 100%;
   font-family: inherit;
-  font-size: 0.85rem;
+  font-size: var(--fs-ui);
   line-height: 1.5;
   color: var(--text);
   background-color: var(--bg-card);
@@ -48,7 +48,7 @@
   width: 14px;
   height: 14px;
   color: var(--text-muted);
-  margin-left: var(--space-sm);
+  margin-left: var(--space-8);
   transition: transform var(--duration-fast) var(--ease-out);
 }
 
@@ -69,6 +69,11 @@
   box-shadow: 0 4px 16px var(--shadow, rgba(0, 0, 0, 0.08)),
               0 1px 3px rgba(0, 0, 0, 0.04);
   z-index: 9999;
+  /* 設定 Dialog (Radix Overlay) 的 disableOutsidePointerEvents 會把 body.pointerEvents
+     設為 none，導致 portal 到 body 的 popup 無法點擊。強制 auto 確保可互動；
+     Dialog 關閉由 SettingsModalShellV2 的 onPointerDownOutside 辨識
+     [data-select-widget-popup] 後 preventDefault 守住。 */
+  pointer-events: auto;
   margin-top: 0;
   overflow: hidden auto;
   flex-direction: column;
@@ -90,7 +95,7 @@
   width: 100%;
   padding: 0.4rem 0.65rem;
   font-family: inherit;
-  font-size: 0.78rem;
+  font-size: var(--fs-caption);
   color: var(--text);
   background: none;
   border: none;
@@ -134,7 +139,7 @@
 }
 
 .optionDesc {
-  font-size: 0.68rem;
+  font-size: var(--fs-hint);
   color: var(--text-muted);
   margin-left: auto;
 }
@@ -146,7 +151,7 @@
 
 .groupHeader {
   padding: 0.45rem 0.55rem 0.15rem;
-  font-size: 0.68rem;
+  font-size: var(--fs-hint);
   color: var(--text-muted);
   letter-spacing: 0.04em;
   text-transform: uppercase;

@@ -464,9 +464,9 @@
   },
   "yuan": {
     "types": {
-      "hanako": {
+      "svananda": {
         "label": "균형 잡힌 어시스턴트",
-        "avatar": "Hanako.png"
+        "avatar": "Svananda.png"
       },
       "butter": {
         "label": "더 풍부한 감성",
@@ -949,10 +949,22 @@
       "newWarmPaperMode": "종이",
       "midnightContrast": "아오이 밤 고대비",
       "midnightContrastMode": "선명",
+      "coral": "산호",
+      "coralMode": "봄 종이",
       "auto": "자동",
       "autoMode": "시스템",
       "font": "글꼴",
       "fontHint": "본문 읽기에 사용할 글꼴을 선택해요",
+      "readingLayout": "읽기 레이아웃",
+      "documentWidth": "문서 너비",
+      "documentWidthHint": "Markdown 편집과 미리보기 본문의 최대 너비를 조정해요.",
+      "chatWidth": "채팅 너비",
+      "chatWidthHint": "채팅 메시지와 입력창의 최대 너비를 조정해요.",
+      "readingWidth": "읽기 너비",
+      "readingWidthHint": "Markdown 편집, 미리보기, 채팅 본문의 최대 너비를 함께 조정해요.",
+      "readingWidthUnlimited": "제한 없음",
+      "bodyFontSizeOffset": "본문 크기",
+      "bodyFontSizeOffsetHint": "기본 채팅 본문 크기를 기준으로 채팅 글자 크기를 단계별로 조정해요.",
       "serifFont": "명조 글꼴",
       "serifFontHint": "본문에 명조 글꼴을 사용해요",
       "paperTexture": "종이 질감",
@@ -1116,6 +1128,9 @@
       "system": "시스템",
       "hardwareAcceleration": "하드웨어 가속",
       "hardwareAccelerationHint": "GPU로 앱 창을 렌더링합니다. 끄면 다음 실행부터 소프트웨어 렌더링을 사용해 Windows GPU 드라이버로 인한 시작 충돌 복구에 도움이 됩니다.",
+      "sidebar": "사이드바",
+      "sessionListSingleLine": "세션 목록 한 줄 표시",
+      "sessionListSingleLineHint": "켜면 각 세션이 한 줄만 사용해요. 마우스를 올리면 오른쪽 작업 버튼이 나타나고 제목은 말줄임표로 줄어들어요.",
       "shortcuts": "단축키",
       "voiceRecordingShortcut": "음성 녹음/전송",
       "voiceRecordingShortcutHint": "메인 채팅 화면에 포커스가 있을 때 한 번 누르면 녹음을 시작하고, 다시 누르면 종료 후 전송합니다."
@@ -1124,8 +1139,11 @@
       "title": "편집기",
       "markdownFont": "글꼴",
       "markdownFontHint": "기본값은 외관의 읽기 글꼴을 따르며, 편집기만 따로 지정할 수도 있어요.",
+      "markdownContentWidth": "본문 너비",
+      "markdownContentWidthHint": "Markdown 편집과 미리보기 본문의 최대 너비를 조정해요.",
+      "markdownContentWidthUnlimited": "제한 없음",
       "markdownBodyFontSize": "본문 크기",
-      "markdownBodyFontSizeHint": "Markdown 편집기 본문은 15px를 기본값으로 사용해요.",
+      "markdownBodyFontSizeHint": "Markdown 편집과 미리보기 본문의 기본 크기를 조정해요.",
       "markdownHeading1FontSize": "제목 1 크기",
       "markdownHeading1FontSizeHint": "# 제목에 사용돼요.",
       "markdownHeading2FontSize": "제목 2 크기",
@@ -1933,6 +1951,12 @@
       "feishuAppId": "App ID",
       "feishuAppSecret": "App Secret",
       "feishuHint": "Feishu 오픈 플랫폼에서 받으세요. 이벤트는 long connection으로 받으며 로컬 callback URL은 필요하지 않습니다",
+      "dingtalk": "DingTalk",
+      "dingtalkClientId": "Client ID / AppKey",
+      "dingtalkClientSecret": "Client Secret / AppSecret",
+      "dingtalkRobotCode": "Robot Code",
+      "dingtalkRestBaseUrl": "REST Base URL",
+      "dingtalkHint": "내부 앱 자격 증명은 token/Stream에, Robot Code는 기업 로봇 발송에 사용됩니다. REST Base URL 기본값은 https://api.dingtalk.io/v1.0 입니다",
       "whatsapp": "WhatsApp",
       "qq": "QQ",
       "qqAppId": "App ID",
@@ -1961,6 +1985,7 @@
       "testFail": "테스트 실패",
       "noToken": "먼저 Bot Token을 입력해 주세요",
       "noCredentials": "먼저 App ID와 App Secret을 입력해 주세요",
+      "noDingtalkCredentials": "먼저 Client ID, Client Secret, Robot Code, REST Base URL을 입력해 주세요",
       "globalSettings": "전역 설정",
       "agentSettings": "에이전트",
       "permissionMode": "권한 모드",
@@ -2002,6 +2027,14 @@
         "중요: \"버전 관리\"에서 버전을 생성하고 게시해 주세요 (롱 커넥션 설정에는 게시된 앱이 필요해요)",
         "위 입력란에 App ID와 App Secret을 붙여넣고 스위치를 켜주세요"
       ],
+      "tutorialDtSteps": [
+        "<code>open.dingtalk.com</code>으로 이동해 개발자 콘솔을 열어 주세요",
+        "내부 기업 앱을 만들고 앱 자격 증명에서 <code>Client ID/AppKey</code>와 <code>Client Secret/AppSecret</code>을 복사해 주세요",
+        "앱 로봇 기능을 추가하고 로봇 상세에서 <code>Robot Code</code>를 복사해 주세요",
+        "로봇 메시지 송수신에 필요한 권한을 확인하고 대상 기업 범위에 배포해 주세요",
+        "DingTalk 호환 게이트웨이를 명시적으로 쓰는 경우가 아니면 REST Base URL은 <code>https://api.dingtalk.io/v1.0</code> 기본값을 유지해 주세요",
+        "위 입력란에 Client ID, Client Secret, Robot Code, REST Base URL을 붙여넣고 연결 테스트 후 스위치를 켜주세요"
+      ],
       "whatsappHint": "곧 지원 예정"
     }
   },
@@ -2026,7 +2059,7 @@
       "userLabel": "어떻게 부르면 될까요?",
       "placeholder": "당신의 이름",
       "agentLabel": "이 Agent를 뭐라고 부를까요?",
-      "agentPlaceholder": "Hanako",
+      "agentPlaceholder": "Svananda",
       "memoryTitle": "메모리 시스템",
       "memoryHint": "켜 두면 시스템이 대화가 끝날 때 채팅 내용을 정리해 메모리로 만듭니다. 메모리가 자주 업데이트되면 모델 캐시 적중률이 낮아질 수 있습니다. 메모리를 끄면 보통 비용이 더 적게 듭니다.",
       "back": "뒤로",
@@ -2226,7 +2259,20 @@
     "cut": "잘라내기",
     "copy": "복사",
     "paste": "붙여넣기",
-    "selectAll": "모두 선택"
+    "selectAll": "모두 선택",
+    "undo": "실행 취소",
+    "redo": "다시 실행",
+    "bold": "굵게",
+    "italic": "기울임꼴",
+    "strikethrough": "취소선",
+    "inlineCode": "인라인 코드",
+    "heading1": "제목 1",
+    "heading2": "제목 2",
+    "heading3": "제목 3",
+    "blockquote": "인용",
+    "codeBlock": "코드 블록",
+    "horizontalRule": "구분선",
+    "list": "목록"
   },
   "rightWorkspace": {
     "activity": {

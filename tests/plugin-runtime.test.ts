@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   createMediaDetails,
   cancelTask,
+  createChatSurfaceCard,
   completeTask,
   defineBusHandler,
   defineCommand,
@@ -14,6 +15,7 @@ import {
   createAgent,
   createSession,
   getAgentProfile,
+  getPluginRequestContext,
   getSession,
   generateMedia,
   generateImage,
@@ -54,6 +56,32 @@ describe('plugin runtime SDK', () => {
       parameters: { type: 'object', properties: {} },
     });
     await expect(tool.execute({ query: 'hana' }, {} as any)).resolves.toBe('search:hana');
+  });
+
+  it('preserves tool sessionPermission metadata for host approval policy', async () => {
+    const sessionPermission = {
+      kind: 'plugin_output' as const,
+      describeSideEffect: vi.fn(() => ({
+        kind: 'session_file_output',
+        summary: 'Writes generated output into plugin data and registers a SessionFile.',
+        ruleId: 'plugin-output-session-file',
+      })),
+    };
+    const execute = vi.fn(async () => 'ok');
+
+    const tool = defineTool({
+      name: 'create_note',
+      description: 'Create a note',
+      sessionPermission,
+      execute,
+    });
+
+    expect(tool.sessionPermission).toBe(sessionPermission);
+    expect(tool.sessionPermission?.describeSideEffect?.({ title: 'Hana' })).toMatchObject({
+      kind: 'session_file_output',
+      ruleId: 'plugin-output-session-file',
+    });
+    await expect(tool.execute({}, {} as any)).resolves.toBe('ok');
   });
 
   it('defines commands with stable slash fields', async () => {
@@ -223,6 +251,32 @@ describe('plugin runtime SDK', () => {
     ).resolves.toEqual({ sent: true });
 
     expect(request).toHaveBeenCalledWith('session:send', { text: 'hello' }, { timeoutMs: 5000 });
+  });
+
+  it('reads plugin route request context from a Hono request object', () => {
+    const request = vi.fn();
+    const routeContext = {
+      pluginId: 'route-plugin',
+      agentId: 'hana',
+      principal: { kind: 'plugin', pluginId: 'route-plugin' },
+      capabilityGrant: { accessLevel: 'full-access', declaredPermissions: ['session'], legacyDeclaration: false },
+      bus: { request },
+    };
+    const honoContext = {
+      get: vi.fn((key: string) => key === 'pluginRequestContext' ? routeContext : undefined),
+    };
+
+    expect(getPluginRequestContext(honoContext)).toBe(routeContext);
+    expect(honoContext.get).toHaveBeenCalledWith('pluginRequestContext');
+  });
+
+  it('throws a clear error when plugin route request context is unavailable', () => {
+    expect(() => getPluginRequestContext({ get: () => undefined })).toThrow(
+      'getPluginRequestContext must be called inside a Hana plugin route handler',
+    );
+    expect(() => getPluginRequestContext({})).toThrow(
+      'getPluginRequestContext requires a Hono context with c.get(name)',
+    );
   });
 
   it('wraps session, agent, model, and media bus calls with typed helpers', async () => {
@@ -557,5 +611,31 @@ describe('plugin runtime SDK', () => {
         ],
       },
     });
+  });
+
+  it('creates declarative chat surface cards from session refs', () => {
+    expect(createChatSurfaceCard(
+      { pluginId: 'tavern' },
+      { sessionId: 'sess_private', sessionPath: '/sessions/tavern.jsonl' },
+      { title: 'Tavern run', description: 'Private transcript' },
+    )).toEqual({
+      type: 'chat.surface',
+      pluginId: 'tavern',
+      sessionId: 'sess_private',
+      sessionPath: '/sessions/tavern.jsonl',
+      sessionRef: {
+        sessionId: 'sess_private',
+        sessionPath: '/sessions/tavern.jsonl',
+      },
+      title: 'Tavern run',
+      description: 'Private transcript',
+      mode: 'transcript',
+    });
+  });
+
+  it('requires chat surface cards to use session identity, not path-only locators', () => {
+    expect(() => createChatSurfaceCard({ pluginId: 'tavern' }, '/sessions/legacy.jsonl')).toThrow(
+      'createChatSurfaceCard requires sessionId or sessionRef',
+    );
   });
 });

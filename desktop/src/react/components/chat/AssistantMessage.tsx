@@ -14,6 +14,8 @@ import { WorkflowInlineCard } from './WorkflowInlineCard';
 import { InterludeBlock } from './InterludeBlock';
 import { SettingsConfirmCard } from './SettingsConfirmCard';
 import { SettingsUpdateCard } from './SettingsUpdateCard';
+import { InteractiveCard } from './InteractiveCard';
+import { useMessageFooterActions } from './MessageActions';
 import { MessageFooterActions, formatMessageTime, type MessageFooterAction } from './MessageFooterActions';
 import { ChatResourceCard } from './ChatResourceCard';
 import { FileResourceIcon, SkillResourceIcon } from './ChatResourceIcons';
@@ -34,7 +36,7 @@ import type { FileRef } from '../../types/file-ref';
 import { openPreview } from '../../stores/preview-actions';
 import { replayLatestUserMessage, branchFromMessage } from '../../stores/message-turn-actions';
 import { selectIsStreamingSession, selectSelectedIdsBySession } from '../../stores/session-selectors';
-import { extractSelectedTexts } from '../../utils/message-text';
+import { extractSelectedTexts, extractTextBlockPlainText } from '../../utils/message-text';
 import { AgentAvatar, resolveAgentDisplayInfo } from '../../utils/agent-display';
 import { ScheduleEditor } from '../automation/ScheduleEditor';
 import { SelectWidget, type SelectOption } from '@/ui';
@@ -56,6 +58,7 @@ interface Props {
   readOnly?: boolean;
   isLatestAssistantMessage?: boolean;
   showTurnCompletionTime?: boolean;
+  assistantTurnSelectionIds?: readonly string[];
   retrySourceMessage?: ChatMessage | null;
   messageRef?: (element: HTMLDivElement | null) => void;
 }
@@ -71,7 +74,8 @@ export const AssistantMessage = memo(function AssistantMessage({
   agentId,
   readOnly = false,
   isLatestAssistantMessage = false,
-  showTurnCompletionTime,
+  showTurnCompletionTime = false,
+  assistantTurnSelectionIds,
   retrySourceMessage = null,
   messageRef,
 }: Props) {
@@ -100,6 +104,7 @@ export const AssistantMessage = memo(function AssistantMessage({
     [message.blocks],
   );
   const isInterludeOnly = blocks.length > 0 && blocks.every(block => block.type === 'interlude');
+  const hasWideBlock = blocks.some(b => b.type === 'interactive_card');
 
   const [copied, setCopied] = useState(false);
   const [retrying, setRetrying] = useState(false);
@@ -113,10 +118,7 @@ export const AssistantMessage = memo(function AssistantMessage({
         (b): b is ContentBlock & { type: 'text' } => b.type === 'text'
       );
       if (textBlocks.length === 0) return;
-      // eslint-disable-next-line no-restricted-syntax
-      const tmp = document.createElement('div');
-      tmp.innerHTML = textBlocks.map(b => b.html).join('\n');
-      text = tmp.innerText.trim();
+      text = extractTextBlockPlainText(textBlocks);
     }
     if (!text) return;
     navigator.clipboard.writeText(text).then(() => {
@@ -151,14 +153,23 @@ export const AssistantMessage = memo(function AssistantMessage({
     }
   }, [branching, isStreaming, message, sessionPath]);
 
-  const canShowRegenerateAction = !readOnly && isLatestAssistantMessage && !!retrySourceMessage && !isStreaming;
-  const shouldShowCompletionTime = showTurnCompletionTime ?? isLatestAssistantMessage;
-  const shouldPersistCompletionTime = shouldShowCompletionTime && isLatestAssistantMessage && !isStreaming;
-  const timeText = shouldShowCompletionTime ? formatMessageTime(message.timestamp) : null;
+  const canShowRegenerateAction = !readOnly && showTurnCompletionTime && isLatestAssistantMessage && !!retrySourceMessage && !isStreaming;
+  const shouldPersistCompletionTime = showTurnCompletionTime && isLatestAssistantMessage && !isStreaming;
+  const timeText = showTurnCompletionTime && !isStreaming ? formatMessageTime(message.timestamp) : null;
+  const standardMessageActions = useMessageFooterActions({
+    messageId: message.id,
+    selectionIds: assistantTurnSelectionIds,
+    sessionPath,
+    onCopy: handleCopy,
+    onScreenshot: () => { void handleScreenshot(); },
+    copied,
+    isStreaming,
+  });
+  // 複製/截圖/選取應在每則助手訊息上可用（不僅限回合結尾）；回合結尾僅控制時間戳記與重新生成。
+  const messageActions = readOnly || isStreaming ? [] : standardMessageActions;
+
   const footerActions = useMemo(() => {
     const actions: MessageFooterAction[] = [];
-
-    // 1. Regenerate
     if (canShowRegenerateAction) {
       actions.push({
         id: 'regenerate',
@@ -168,27 +179,6 @@ export const AssistantMessage = memo(function AssistantMessage({
         disabled: retrying || isStreaming,
       });
     }
-
-    // 2. Copy
-    actions.push({
-      id: 'copy',
-      title: copied ? (t('common.copied') || 'Copied') : t('common.copyText'),
-      icon: copied ? <CheckIcon /> : <CopyIcon />,
-      onClick: () => handleCopy(),
-      disabled: isStreaming,
-      active: copied,
-    });
-
-    // 3. Screenshot
-    actions.push({
-      id: 'screenshot',
-      title: t('common.screenshot'),
-      icon: <ScreenshotIcon />,
-      onClick: () => { void handleScreenshot(); },
-      disabled: isStreaming,
-    });
-
-    // 4. Branch
     if (!readOnly && !!message.sourceEntryId && !isInterludeOnly) {
       actions.push({
         id: 'branch',
@@ -199,23 +189,8 @@ export const AssistantMessage = memo(function AssistantMessage({
         active: branching,
       });
     }
-
     return actions;
-  }, [
-    branching,
-    canShowRegenerateAction,
-    copied,
-    handleBranch,
-    handleCopy,
-    handleRegenerate,
-    handleScreenshot,
-    isInterludeOnly,
-    isStreaming,
-    message.sourceEntryId,
-    readOnly,
-    retrying,
-    t,
-  ]);
+  }, [branching, canShowRegenerateAction, handleBranch, handleRegenerate, isInterludeOnly, isStreaming, message.sourceEntryId, readOnly, retrying, t]);
 
   return (
     <div className={`${styles.messageGroup} ${styles.messageGroupAssistant}${isInterludeOnly ? ` ${styles.messageGroupInterludeOnly}` : ''}${isSelected ? ` ${styles.messageGroupSelected}` : ''}`}
@@ -231,7 +206,7 @@ export const AssistantMessage = memo(function AssistantMessage({
           <span className={styles.avatarName}>{displayName}</span>
         </div>
       )}
-      <div className={`${styles.message} ${styles.messageAssistant}${isInterludeOnly ? ` ${styles.messageAssistantInterludeOnly}` : ''}`}>
+      <div className={`${styles.message} ${styles.messageAssistant}${hasWideBlock ? ` ${styles.messageHasWideBlock}` : ''}${isInterludeOnly ? ` ${styles.messageAssistantInterludeOnly}` : ''}`}>
         {blocks.map((block, i) => (
           <ContentBlockErrorBoundary
             key={`block-${i}`}
@@ -253,28 +228,15 @@ export const AssistantMessage = memo(function AssistantMessage({
           </ContentBlockErrorBoundary>
         ))}
       </div>
-      {!isInterludeOnly && (timeText || footerActions.length > 0) && (
-        <div
-          className={`${styles.assistantFooterContainer}${shouldPersistCompletionTime ? ` ${styles.messageFooterActionsTimePersistent}` : ''}`}
-          data-testid="assistant-completion-actions"
-        >
-          <div>
-            {timeText && <span className={styles.messageFooterTime}>{timeText}</span>}
-          </div>
-          <div className={styles.assistantFooterRightActions}>
-            {footerActions.map(action => (
-              <button
-                key={action.id}
-                className={`${styles.messageFooterBtn}${action.active ? ` ${styles.messageFooterBtnActive}` : ''}`}
-                onClick={action.onClick}
-                title={action.title}
-                disabled={action.disabled}
-              >
-                {action.icon}
-              </button>
-            ))}
-          </div>
-        </div>
+      {!isInterludeOnly && (timeText || footerActions.length > 0 || messageActions.length > 0) && (
+        <MessageFooterActions
+          align="left"
+          timeText={timeText}
+          timePersistent={shouldPersistCompletionTime}
+          leadingActions={footerActions}
+          actions={messageActions}
+          testId="assistant-completion-actions"
+        />
       )}
     </div>
   );
@@ -1259,3 +1221,4 @@ BLOCK_RENDERERS['cron_confirm'] = CronConfirmBlock;
 BLOCK_RENDERERS['suggestion_card'] = CronConfirmBlock;
 BLOCK_RENDERERS['settings_confirm'] = SettingsConfirmBlock;
 BLOCK_RENDERERS['settings_update'] = SettingsUpdateBlock;
+BLOCK_RENDERERS['interactive_card'] = InteractiveCard;

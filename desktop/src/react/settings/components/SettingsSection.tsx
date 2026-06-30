@@ -1,7 +1,7 @@
 import React from 'react';
 import styles from './settings-components.module.css';
 
-type Variant = 'default' | 'hero' | 'double-column' | 'flush';
+type Variant = 'default' | 'hero' | 'double-column' | 'flush' | 'list';
 
 interface SettingsSectionProps {
   title?: React.ReactNode;
@@ -16,6 +16,18 @@ interface SettingsSectionProps {
 
 interface FooterProps {
   children: React.ReactNode;
+}
+
+interface CardProps extends React.HTMLAttributes<HTMLDivElement> {
+  children: React.ReactNode;
+}
+
+function Card({ children, className, ...rest }: CardProps) {
+  return (
+    <div className={[styles.sectionCard, className].filter(Boolean).join(' ')} {...rest}>
+      {children}
+    </div>
+  );
 }
 
 function Footer({ children }: FooterProps) {
@@ -54,6 +66,7 @@ function SettingsSectionBase({ title, description, context, variant = 'default',
     variant === 'hero' && styles.sectionHero,
     variant === 'double-column' && styles.sectionDoubleColumn,
     variant === 'flush' && styles.sectionFlush,
+    variant === 'list' && styles.sectionList,
     className,
   ].filter(Boolean).join(' ');
 
@@ -78,6 +91,7 @@ function SettingsSectionBase({ title, description, context, variant = 'default',
 }
 
 export const SettingsSection = Object.assign(SettingsSectionBase, {
+  Card,
   Footer,
   Note,
   SubBlock,

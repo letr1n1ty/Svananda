@@ -52,4 +52,47 @@ describe("enrichModelFromKnownMetadata", () => {
       reasoningProfile: "kimi-openai",
     });
   });
+
+  it("adds image input to runtime-discovered Ollama vision model families", () => {
+    const model = {
+      id: "llava:latest",
+      name: "LLaVA Latest",
+      api: "openai-completions",
+      provider: "ollama",
+      baseUrl: "http://localhost:11434/v1",
+      input: ["text"],
+    };
+
+    const enriched = enrichModelFromKnownMetadata(model);
+
+    expect(enriched.input).toEqual(["text", "image"]);
+  });
+
+  it("marks runtime-discovered Volcengine coding models without image metadata as text-only", () => {
+    const model = {
+      id: "ark-code-latest",
+      name: "Ark Code Latest",
+      api: "openai-completions",
+      provider: "volcengine-coding",
+      baseUrl: "https://ark.cn-beijing.volces.com/api/v3",
+    };
+
+    const enriched = enrichModelFromKnownMetadata(model);
+
+    expect(enriched.input).toEqual(["text"]);
+  });
+
+  it("keeps known Volcengine coding vision models image-capable", () => {
+    const model = {
+      id: "doubao-seed-2-0-pro-260215",
+      name: "Doubao Seed 2.0 Pro",
+      api: "openai-completions",
+      provider: "volcengine-coding",
+      baseUrl: "https://ark.cn-beijing.volces.com/api/v3",
+    };
+
+    const enriched = enrichModelFromKnownMetadata(model);
+
+    expect(enriched.input).toEqual(["text", "image"]);
+  });
 });

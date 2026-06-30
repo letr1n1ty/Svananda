@@ -1,3 +1,25 @@
+import type {
+  PluginResourceDescriptor,
+  PluginResourceEdit,
+  PluginResourceListItem,
+  PluginResourceListResult,
+  PluginResourceMaterializeResult,
+  PluginResourceMoveResult,
+  PluginResourceReadResult,
+  PluginResourceRef,
+  PluginResourceSearchMatch,
+  PluginResourceSearchOptions,
+  PluginResourceSearchResult,
+  PluginResourceStat,
+  PluginResourceTrashOptions,
+  PluginResourceTrashResult,
+  PluginResourceVersion,
+  PluginResourceWatchTarget,
+  PluginResourceWriteConflictResult,
+  PluginResourceWriteExpectedVersionResult,
+  PluginResourceMutationResult,
+} from '@hana/plugin-protocol';
+
 export type MaybePromise<T> = T | Promise<T>;
 
 export type JsonSchema = Record<string, unknown>;
@@ -83,6 +105,64 @@ export interface HanaResourceEnvelope {
   [key: string]: unknown;
 }
 
+export type HanaResourceRef = PluginResourceRef;
+export type HanaResourceVersion = PluginResourceVersion;
+export type HanaResourceDescriptor = PluginResourceDescriptor;
+export type HanaResourceStat = PluginResourceStat;
+export type HanaResourceReadResult = PluginResourceReadResult;
+export type HanaResourceMutationResult = PluginResourceMutationResult;
+export type HanaResourceWriteConflictResult = PluginResourceWriteConflictResult;
+export type HanaResourceWriteExpectedVersionResult = PluginResourceWriteExpectedVersionResult;
+export type HanaResourceMoveResult = PluginResourceMoveResult;
+export type HanaResourceTrashOptions = PluginResourceTrashOptions;
+export type HanaResourceTrashResult = PluginResourceTrashResult;
+export type HanaResourceEdit = PluginResourceEdit;
+export type HanaResourceListItem = PluginResourceListItem;
+export type HanaResourceListResult = PluginResourceListResult;
+export type HanaResourceSearchOptions = PluginResourceSearchOptions;
+export type HanaResourceSearchMatch = PluginResourceSearchMatch;
+export type HanaResourceSearchResult = PluginResourceSearchResult;
+export type HanaResourceMaterializeResult = PluginResourceMaterializeResult;
+export type HanaResourceWatchTarget = PluginResourceWatchTarget;
+
+export interface HanaPluginResourceMutationOptions {
+  emit?: boolean;
+}
+
+export interface HanaPluginResourceWatchOptions {
+  purpose?: string | null;
+  sessionRef?: HanaSessionRef | { sessionPath?: string | null; path?: string | null } | null;
+  /** @deprecated Prefer sessionId/sessionRef on the invocation context. */
+  sessionPath?: string | null;
+}
+
+export interface HanaResourceWatchSubscription {
+  subscriptionId: string;
+  resourceKeys: string[];
+  unsubscribe(): boolean;
+  close(): boolean;
+}
+
+export interface HanaPluginResources {
+  stat(ref: HanaResourceRef | Record<string, unknown>): Promise<HanaResourceStat>;
+  read(ref: HanaResourceRef | Record<string, unknown>): Promise<HanaResourceReadResult>;
+  list(ref: HanaResourceRef | Record<string, unknown>): Promise<HanaResourceListResult>;
+  search(ref: HanaResourceRef | Record<string, unknown>, options?: HanaResourceSearchOptions): Promise<HanaResourceSearchResult>;
+  materialize(ref: HanaResourceRef | Record<string, unknown>): Promise<HanaResourceMaterializeResult>;
+  write(ref: HanaResourceRef | Record<string, unknown>, content: string | Uint8Array | ArrayBuffer, options?: HanaPluginResourceMutationOptions): Promise<HanaResourceMutationResult>;
+  writeExpectedVersion(ref: HanaResourceRef | Record<string, unknown>, content: string | Uint8Array | ArrayBuffer, expectedVersion: HanaResourceVersion, options?: HanaPluginResourceMutationOptions): Promise<HanaResourceWriteExpectedVersionResult>;
+  edit(ref: HanaResourceRef | Record<string, unknown>, edits: HanaResourceEdit[], options?: HanaPluginResourceMutationOptions): Promise<HanaResourceMutationResult>;
+  mkdir(ref: HanaResourceRef | Record<string, unknown>, options?: HanaPluginResourceMutationOptions): Promise<HanaResourceMutationResult>;
+  delete(ref: HanaResourceRef | Record<string, unknown>, options?: HanaPluginResourceMutationOptions): Promise<HanaResourceMutationResult>;
+  copy(from: HanaResourceRef | Record<string, unknown>, to: HanaResourceRef | Record<string, unknown>, options?: HanaPluginResourceMutationOptions): Promise<HanaResourceMutationResult>;
+  rename(from: HanaResourceRef | Record<string, unknown>, to: HanaResourceRef | Record<string, unknown>, options?: HanaPluginResourceMutationOptions): Promise<HanaResourceMoveResult>;
+  move(from: HanaResourceRef | Record<string, unknown>, to: HanaResourceRef | Record<string, unknown>, options?: HanaPluginResourceMutationOptions): Promise<HanaResourceMoveResult>;
+  trash(ref: HanaResourceRef | Record<string, unknown>, trashOptions?: HanaResourceTrashOptions, options?: HanaPluginResourceMutationOptions): Promise<HanaResourceTrashResult>;
+  watch(ref: HanaResourceRef | Record<string, unknown>, options?: HanaPluginResourceWatchOptions): HanaResourceWatchSubscription;
+  subscribe(resources: Array<HanaResourceRef | Record<string, unknown>>, options?: HanaPluginResourceWatchOptions): HanaResourceWatchSubscription;
+  resolveWatchTarget?(ref: HanaResourceRef | Record<string, unknown>, options?: HanaPluginResourceWatchOptions): HanaResourceWatchTarget;
+}
+
 export interface HanaExecutionBoundary {
   schemaVersion: 1;
   boundaryId: string;
@@ -135,6 +215,27 @@ export interface HanaMediaDetails {
   };
 }
 
+export interface HanaChatSurfaceCardOptions {
+  title?: string;
+  description?: string;
+  mode?: 'transcript' | 'full' | string;
+  composer?: boolean;
+  aspectRatio?: string;
+}
+
+export interface HanaChatSurfaceCardDetails {
+  type: 'chat.surface';
+  pluginId: string;
+  sessionId: string;
+  sessionRef: HanaSessionRef;
+  sessionPath?: string;
+  title?: string;
+  description: string;
+  mode: 'transcript' | 'full' | string;
+  composer?: boolean;
+  aspectRatio?: string;
+}
+
 export interface HanaPluginNetworkFetchInit extends RequestInit {
   timeoutMs?: number;
   cacheTtlMs?: number;
@@ -166,11 +267,42 @@ export interface HanaToolContext {
   sessionPath?: string | null;
   bus: HanaEventBus;
   network: HanaPluginNetwork;
+  resources: HanaPluginResources;
   config: HanaPluginConfigStore;
   log: HanaPluginLogger;
   registerSessionFile?: (input: Record<string, unknown>) => HanaSessionFile;
   stageFile?: (input: Record<string, unknown>) => HanaStagedSessionFile;
   [key: string]: unknown;
+}
+
+export type HanaToolSessionPermissionKind =
+  | 'read'
+  | 'read_only'
+  | 'plugin_output'
+  | 'session_file_output'
+  | 'workspace_write'
+  | 'external_side_effect'
+  | 'review'
+  | string;
+
+export interface HanaToolSessionPermission<Input = unknown> {
+  /**
+   * True means the tool only reads already-authorized data and may run in
+   * read-only sessions without reviewer escalation.
+   */
+  readOnly?: boolean;
+  /**
+   * Host approval classification hint. Unknown or external side-effect kinds
+   * remain reviewer-bound in Auto mode.
+   */
+  kind?: HanaToolSessionPermissionKind;
+  /**
+   * Override Auto-mode handling for a declared non-read tool.
+   */
+  auto?: 'allow' | 'review';
+  description?: string;
+  sideEffect?: Record<string, unknown>;
+  describeSideEffect?: (input: Input) => Record<string, unknown> | null | undefined;
 }
 
 export interface HanaToolDefinition<Input = unknown, Output = unknown> {
@@ -179,6 +311,7 @@ export interface HanaToolDefinition<Input = unknown, Output = unknown> {
   parameters?: JsonSchema;
   promptSnippet?: string;
   promptGuidelines?: string;
+  sessionPermission?: HanaToolSessionPermission<Input>;
   metadata?: Record<string, unknown>;
   invocationStyle?: 'sdk_tool' | 'pi_tool';
   execute(input: Input, ctx: HanaToolContext): MaybePromise<Output>;
@@ -560,6 +693,40 @@ export interface HanaEventBus {
   getCapability?(type: string): HanaEventBusCapability | null;
 }
 
+export interface HanaPluginRouteRequestContext {
+  pluginId: string;
+  agentId: string | null;
+  principal: Record<string, unknown> | null;
+  capabilityGrant: {
+    accessLevel: string;
+    declaredPermissions: readonly string[];
+    legacyDeclaration: boolean;
+  };
+  bus: Pick<HanaEventBus, 'request' | 'emit' | 'subscribe' | 'hasHandler' | 'getCapability' | 'listCapabilities'>;
+}
+
+export interface HanaPluginHonoLikeContext {
+  get?(name: string): unknown;
+}
+
+export function getPluginRequestContext(c: HanaPluginHonoLikeContext): HanaPluginRouteRequestContext {
+  if (!c || typeof c.get !== 'function') {
+    throw new Error('getPluginRequestContext requires a Hono context with c.get(name)');
+  }
+  const requestContext = c.get('pluginRequestContext');
+  if (!requestContext || typeof requestContext !== 'object') {
+    throw new Error('getPluginRequestContext must be called inside a Hana plugin route handler');
+  }
+  const bus = (requestContext as Record<string, unknown>).bus;
+  const request = bus && typeof bus === 'object'
+    ? (bus as { request?: unknown }).request
+    : null;
+  if (typeof request !== 'function') {
+    throw new Error('getPluginRequestContext found an invalid plugin route request context');
+  }
+  return requestContext as HanaPluginRouteRequestContext;
+}
+
 export interface HanaBusSubscriptionFilter {
   types?: string[] | Set<string>;
   [key: string]: unknown;
@@ -703,6 +870,7 @@ export interface HanaBusHandlerContext {
   pluginId: string;
   bus: HanaEventBus;
   network?: HanaPluginNetwork;
+  resources?: HanaPluginResources;
   config?: HanaPluginConfigStore;
   log?: HanaPluginLogger;
   [key: string]: unknown;
@@ -738,6 +906,7 @@ export interface HanaPluginContext {
   sessionPath?: string | null;
   bus: HanaEventBus;
   network: HanaPluginNetwork;
+  resources: HanaPluginResources;
   config: HanaPluginConfigStore;
   log: HanaPluginLogger;
   registerTool?: (tool: HanaToolDefinition) => () => void;
@@ -957,6 +1126,39 @@ function normalizeSessionTarget(target: HanaSessionTarget): Record<string, unkno
 function sessionRefFromTarget(target: HanaSessionTarget): HanaSessionRef | null {
   const payload = normalizeSessionTarget(target);
   return (payload.sessionRef as HanaSessionRef | undefined) || null;
+}
+
+export function createChatSurfaceCard(
+  ctx: { pluginId?: string | null },
+  target: HanaSessionTarget,
+  options: HanaChatSurfaceCardOptions = {},
+): HanaChatSurfaceCardDetails {
+  const pluginId = pluginIdFromContext(ctx);
+  if (!pluginId) {
+    throw new Error('createChatSurfaceCard requires ctx.pluginId');
+  }
+  const payload = normalizeSessionTarget(target);
+  const sessionId = textOrNull(payload.sessionId);
+  const sessionPath = textOrNull(payload.sessionPath);
+  if (!sessionId) {
+    throw new Error('createChatSurfaceCard requires sessionId or sessionRef; sessionPath alone is legacy locator metadata');
+  }
+  const sessionRef: HanaSessionRef = {
+    sessionId,
+    ...(sessionPath ? { sessionPath } : {}),
+  };
+  return {
+    type: 'chat.surface',
+    pluginId,
+    sessionId,
+    sessionRef,
+    ...(sessionPath ? { sessionPath } : {}),
+    ...(options.title ? { title: options.title } : {}),
+    description: options.description || 'Plugin private chat session.',
+    mode: options.mode || 'transcript',
+    ...(options.composer !== undefined ? { composer: options.composer } : {}),
+    ...(options.aspectRatio ? { aspectRatio: options.aspectRatio } : {}),
+  };
 }
 
 export function createSession(

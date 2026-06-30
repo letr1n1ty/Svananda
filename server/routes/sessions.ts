@@ -8,9 +8,10 @@ import { Hono } from "hono";
 import { safeJson } from "../hono-helpers.ts";
 import { t } from "../../lib/i18n.ts";
 import { extractBlocks, resolveMediaGenerationBlocks } from "../block-extractors.ts";
+import { normalizePluginChatSurfaceBlocks } from "../plugin-chat-surface.ts";
 import { buildDeferredResultInterludeBlock, resolveDeferredReceiverName } from "../deferred-result-interlude.ts";
 import { BrowserManager } from "../../lib/browser/browser-manager.ts";
-import { sessionIdFromFilename } from "../../lib/session-jsonl.ts";
+import { isSessionJsonlFilename, sessionIdFromFilename } from "../../lib/session-jsonl.ts";
 import {
   DEFERRED_RESULT_MESSAGE_TYPE,
   DEFERRED_RESULT_RECORD_TYPE,
@@ -19,11 +20,19 @@ import {
   parseDeferredResultRecord,
 } from "../../lib/deferred-result-notification.ts";
 import {
+  TURN_INPUT_CONSUMPTION_EVENT_TYPE,
+  TURN_INPUT_PRESENTATION_EVENT_TYPE,
+  parseTurnInputConsumptionRecord,
+  parseTurnInputPresentationRecord,
+} from "../../lib/turn-input-presentation.ts";
+import {
   materializeExecutorIdentity,
+  normalizeExecutorMetadata,
   readSubagentSessionMetaSync,
 } from "../../lib/subagent-executor-metadata.ts";
 import {
   extractTextContent,
+  contentHasThinkingBlock,
   filterUnreferencedInlineImages,
   loadSessionHistoryMessages,
   loadLatestAssistantSummaryFromSessionFile,
@@ -62,6 +71,7 @@ import { createModuleLogger } from "../../lib/debug-log.ts";
 import { searchSessions } from "../../lib/search/session-search.ts";
 import { SessionSearchTokenizerUnavailableError } from "../../lib/search/session-search-tokenizer.ts";
 import { MountAwareFileError, MountAwareFileService } from "../../core/mount-aware-file-service.ts";
+import { isAssistantCommentaryTextBlock } from "../../shared/text-signature.ts";
 
 const log = createModuleLogger("sessions");
 const lifecycleLog = createModuleLogger("sessions/lifecycle");
@@ -152,6 +162,33 @@ function routeError(message, code, status) {
   return err;
 }
 
+function statusFromRouteError(err) {
+  return Number.isInteger(err?.status) ? err.status : 500;
+}
+
+function bodyFromRouteError(err) {
+  return {
+    error: err?.message || String(err),
+    ...(err?.code ? { code: err.code } : {}),
+  };
+}
+
+async function resumeBrowserForSessionSwitch(bm, sessionPath) {
+  if (typeof bm.resumeForSessionIfAvailable === "function") {
+    return await bm.resumeForSessionIfAvailable(sessionPath);
+  }
+  await bm.resumeForSession(sessionPath);
+  return {
+    status: "resumed",
+    canResume: true,
+    reason: null,
+    hostConnected: null,
+    hasResumeState: true,
+    running: bm.isRunning(sessionPath),
+    url: bm.currentUrl(sessionPath) || null,
+  };
+}
+
 function classifySessionCreationError(err) {
   const message = err?.message || String(err);
   if (err?.status && Number.isInteger(err.status)) {
@@ -188,7 +225,7 @@ function hasTextBlockContent(content, { stripThink = false } = {}) {
     return text.length > 0;
   }
   if (!Array.isArray(content)) return false;
-  return content.some(block => block?.type === "text" && block.text);
+  return content.some(block => block?.type === "text" && block.text && !isAssistantCommentaryTextBlock(block));
 }
 
 function hasToolUseContent(content) {
@@ -202,9 +239,24 @@ function isDisplayableHistoryMessage(message) {
     return hasTextBlockContent(message.content) || hasInlineImageContent(message.content);
   }
   if (message.role === "assistant") {
-    return hasTextBlockContent(message.content, { stripThink: true }) || hasToolUseContent(message.content);
+    return hasTextBlockContent(message.content, { stripThink: true })
+      || contentHasThinkingBlock(message.content, { stripThink: true })
+      || hasToolUseContent(message.content);
   }
   return false;
+}
+
+function nextImmediateDisplayableAssistantIndex(sourceMessages, sourceIndex, displayIdxAtSource) {
+  let displayIdx = displayIdxAtSource;
+  for (let i = sourceIndex + 1; i < sourceMessages.length; i += 1) {
+    const message = sourceMessages[i];
+    if (!isDisplayableHistoryMessage(message)) continue;
+    const currentIndex = displayIdx;
+    displayIdx += 1;
+    if (message.role === "user") return null;
+    if (message.role === "assistant") return currentIndex;
+  }
+  return null;
 }
 
 function resolveHistoryPageBounds(sourceMessages, { beforeId, limit, forceAll }) {
@@ -236,6 +288,7 @@ async function readSessionFileRevision(sessionPath) {
 
 export function createSessionsRoute(engine, hub = null) {
   const route = new Hono();
+  const lifecycleLocks = new Map();
 
   function resolveSessionCacheLocator(sessionPath) {
     if (!sessionPath) return { cacheKey: null, readPath: null, sessionId: null };
@@ -286,10 +339,13 @@ export function createSessionsRoute(engine, hub = null) {
     const map = new Map();
     return (sessionPath) => {
       if (!sessionPath) return null;
-      const { cacheKey, readPath } = resolveSessionCacheLocator(sessionPath);
+      const { cacheKey, readPath, sessionId } = resolveSessionCacheLocator(sessionPath);
       if (!cacheKey || !readPath) return null;
       if (map.has(cacheKey)) return map.get(cacheKey);
-      const meta = readSubagentSessionMetaSync(readPath);
+      const manifestMeta = normalizeExecutorMetadata(
+        engine.getSessionExecutorMetadata?.({ sessionId, sessionPath: readPath }),
+      );
+      const meta = manifestMeta || readSubagentSessionMetaSync(readPath);
       map.set(cacheKey, meta);
       return meta;
     };
@@ -452,6 +508,84 @@ export function createSessionsRoute(engine, hub = null) {
 
   function activePathForArchivedSession(sessionPath) {
     return path.join(path.dirname(path.dirname(sessionPath)), path.basename(sessionPath));
+  }
+
+  function lifecycleLockKeyForPaths(paths) {
+    for (const sessionPath of uniqueLifecyclePaths(paths)) {
+      try {
+        const sessionId = engine.getSessionIdForPath?.(sessionPath);
+        if (typeof sessionId === "string" && sessionId.trim()) return `session:${sessionId.trim()}`;
+      } catch {
+        // Fall through to path-derived legacy lock keys.
+      }
+    }
+    for (const sessionPath of uniqueLifecyclePaths(paths)) {
+      const sessionPathText = typeof sessionPath === "string" ? sessionPath : "";
+      const agentId = engine.agentIdFromSessionPath?.(sessionPathText) || "unknown-agent";
+      const basename = path.basename(sessionPathText);
+      if (basename) return `legacy:${agentId}:${basename}`;
+    }
+    return "legacy:unknown-session";
+  }
+
+  async function withSessionLifecycleLock(paths, fn) {
+    const key = lifecycleLockKeyForPaths(paths);
+    while (lifecycleLocks.has(key)) {
+      await lifecycleLocks.get(key).catch(() => {});
+    }
+    let release;
+    const held = new Promise((resolve) => { release = resolve; });
+    lifecycleLocks.set(key, held);
+    try {
+      return await fn();
+    } finally {
+      if (lifecycleLocks.get(key) === held) lifecycleLocks.delete(key);
+      release();
+    }
+  }
+
+  async function moveSessionLifecycleOrThrow(input) {
+    if (typeof engine.moveSessionLifecycle !== "function") {
+      throw routeError(
+        "Session manifest lifecycle transition is unavailable",
+        "session_manifest_unavailable",
+        503,
+      );
+    }
+    const manifest = await engine.moveSessionLifecycle(input);
+    if (!manifest?.sessionId) {
+      throw routeError(
+        "Session manifest lifecycle transition failed",
+        "session_lifecycle_transition_failed",
+        500,
+      );
+    }
+    return manifest;
+  }
+
+  async function sessionFileHasMessages(sessionPath) {
+    const raw = await fs.readFile(sessionPath, "utf-8");
+    for (const line of raw.split("\n")) {
+      if (!line.trim()) continue;
+      let entry;
+      try {
+        entry = JSON.parse(line);
+      } catch {
+        return true;
+      }
+      if (entry?.type === "message" && entry.message) return true;
+    }
+    return false;
+  }
+
+  async function repairHeaderOnlyActiveRestoreTarget(destPath) {
+    if (!(await pathExists(destPath))) return { repaired: false };
+    if (await sessionFileHasMessages(destPath)) {
+      throw routeError("Active path already exists with messages", "active_session_conflict", 409);
+    }
+    await fs.unlink(destPath);
+    deleteSessionFileSidecarSync(destPath);
+    return { repaired: true };
   }
 
   function uniqueLifecyclePaths(paths) {
@@ -903,21 +1037,78 @@ export function createSessionsRoute(engine, hub = null) {
       const blocks = [];
       const mediaGenerationResults = new Map();
       const standaloneMediaGenerationResults = [];
-      const deferredInterludeTaskIds = new Set();
+      const deferredInterludeDeliveryIds = new Set();
+      const turnInputConsumptionDeliveryIds = new Set();
+      const turnInputConsumptionEntryIds = new Set();
       const deferredStore = engine.deferredResults;
       const receiverName = resolveDeferredReceiverName(engine, resolvedSessionPath);
-      const recordMediaGenerationResult = (parsed, afterIndex) => {
+      for (const message of sourceMessages) {
+        if (message?.role !== "custom" || message.customType !== TURN_INPUT_CONSUMPTION_EVENT_TYPE) continue;
+        const parsed = parseTurnInputConsumptionRecord(message.data);
+        const deliveryId = typeof parsed?.deliveryId === "string" && parsed.deliveryId.trim()
+          ? parsed.deliveryId.trim()
+          : null;
+        const entryId = typeof parsed?.input?.entryId === "string" && parsed.input.entryId.trim()
+          ? parsed.input.entryId.trim()
+          : null;
+        if (deliveryId) turnInputConsumptionDeliveryIds.add(deliveryId);
+        if (entryId) turnInputConsumptionEntryIds.add(entryId);
+      }
+      const recordMediaGenerationResult = (parsed, afterIndex, sourceIndex = null) => {
         if (!parsed?.taskId || !isMediaGenerationDeferredResult(parsed)) return;
         mediaGenerationResults.set(parsed.taskId, parsed);
         if (parsed.status === "success") {
           standaloneMediaGenerationResults.push({
             ...parsed,
             afterIndex,
+            ...(Number.isInteger(sourceIndex) ? { sourceIndex } : {}),
           });
         }
       };
-      const recordDeferredInterlude = (parsed, afterIndex) => {
-        if (!parsed?.taskId || afterIndex < 0 || deferredInterludeTaskIds.has(parsed.taskId)) return;
+      const recordTurnInputConsumptionInterlude = (message, afterIndex, sourceIndex = null) => {
+        if (!Number.isInteger(afterIndex) || afterIndex < 0) return;
+        const parsed = parseTurnInputConsumptionRecord(message?.data);
+        const block = parsed?.block;
+        if (!block || block.type !== "interlude") return;
+        const normalizedDeliveryId = typeof parsed.deliveryId === "string" && parsed.deliveryId.trim()
+          ? parsed.deliveryId.trim()
+          : null;
+        if (normalizedDeliveryId && deferredInterludeDeliveryIds.has(normalizedDeliveryId)) return;
+        blocks.push({
+          ...block,
+          ...(normalizedDeliveryId ? { deliveryId: normalizedDeliveryId } : {}),
+          afterIndex,
+          ...(Number.isInteger(sourceIndex) ? { sourceIndex } : {}),
+        });
+        if (normalizedDeliveryId) deferredInterludeDeliveryIds.add(normalizedDeliveryId);
+      };
+      const recordTurnInputPresentationInterlude = (message, afterIndex, sourceIndex = null) => {
+        if (!Number.isInteger(afterIndex) || afterIndex < 0) return;
+        const parsed = parseTurnInputPresentationRecord(message?.data);
+        const block = parsed?.block;
+        if (!block || block.type !== "interlude") return;
+        const normalizedDeliveryId = typeof parsed.deliveryId === "string" && parsed.deliveryId.trim()
+          ? parsed.deliveryId.trim()
+          : null;
+        if (normalizedDeliveryId && deferredInterludeDeliveryIds.has(normalizedDeliveryId)) return;
+        blocks.push({
+          ...block,
+          ...(normalizedDeliveryId ? { deliveryId: normalizedDeliveryId } : {}),
+          afterIndex,
+          ...(Number.isInteger(sourceIndex) ? { sourceIndex } : {}),
+        });
+        if (normalizedDeliveryId) deferredInterludeDeliveryIds.add(normalizedDeliveryId);
+      };
+      const recordDeferredInterlude = (parsed, afterIndex, deliveryId = null, sourceIndex = null) => {
+        if (!parsed?.taskId || !Number.isInteger(afterIndex) || afterIndex < 0) return;
+        const normalizedDeliveryId = typeof deliveryId === "string" && deliveryId.trim() ? deliveryId.trim() : null;
+        const sourceMessage = Number.isInteger(sourceIndex) ? sourceMessages[sourceIndex] : null;
+        const sourceEntryId = typeof sourceMessage?.id === "string" && sourceMessage.id.trim()
+          ? sourceMessage.id.trim()
+          : null;
+        if (normalizedDeliveryId && turnInputConsumptionDeliveryIds.has(normalizedDeliveryId)) return;
+        if (sourceEntryId && turnInputConsumptionEntryIds.has(sourceEntryId)) return;
+        if (normalizedDeliveryId && deferredInterludeDeliveryIds.has(normalizedDeliveryId)) return;
         const task = deferredStore?.query?.(parsed.taskId) || null;
         const run = engine.subagentRuns?.query?.(parsed.taskId) || null;
         const runTask = taskFromSubagentRun(run);
@@ -929,20 +1120,25 @@ export function createSessionsRoute(engine, hub = null) {
         };
         const event = {
           taskId: parsed.taskId,
+          deliveryId: normalizedDeliveryId,
           status: parsed.status === "failed" || parsed.status === "aborted" ? parsed.status : "success",
           result: Object.prototype.hasOwnProperty.call(parsed, "result") ? parsed.result : metadataTask?.result,
           reason: parsed.reason || metadataTask?.reason || null,
           meta,
         };
-        if (!meta.interlude) return;
         const block = buildDeferredResultInterludeBlock(event, { receiverName });
         if (!block) return;
-        blocks.push({ ...block, afterIndex });
-        deferredInterludeTaskIds.add(parsed.taskId);
+        blocks.push({
+          ...block,
+          afterIndex,
+          ...(Number.isInteger(sourceIndex) ? { sourceIndex } : {}),
+        });
+        if (normalizedDeliveryId) deferredInterludeDeliveryIds.add(normalizedDeliveryId);
       };
       let displayIdx = 0;
 
-      for (const m of sourceMessages) {
+      for (let sourceIndex = 0; sourceIndex < sourceMessages.length; sourceIndex += 1) {
+        const m = sourceMessages[sourceIndex];
         if (m.role === "user") {
           if (!isDisplayableHistoryMessage(m)) continue;
           const currentIndex = displayIdx;
@@ -952,6 +1148,7 @@ export function createSessionsRoute(engine, hub = null) {
             const visibleImages = filterUnreferencedInlineImages(text, images);
             messages.push({
               id: String(currentIndex),
+              sourceIndex,
               ...(m.id ? { entryId: m.id } : {}),
               role: "user",
               content: text,
@@ -967,10 +1164,11 @@ export function createSessionsRoute(engine, hub = null) {
             const { text, thinking, toolUses } = extractTextContent(m.content, { stripThink: true });
             messages.push({
               id: String(currentIndex),
+              sourceIndex,
               ...(m.id ? { entryId: m.id } : {}),
               role: "assistant",
               content: text,
-              thinking: thinking || undefined,
+              ...(contentHasThinkingBlock(m.content, { stripThink: true }) ? { thinking } : {}),
               toolCalls: toolUses.length ? toolUses : undefined,
               ...(m.timestamp ? { timestamp: m.timestamp } : {}),
             });
@@ -980,7 +1178,7 @@ export function createSessionsRoute(engine, hub = null) {
           if (afterIndex >= pageBounds.startIdx && afterIndex < pageBounds.endIdx) {
             const extracted = extractBlocks(m.toolName, m.details, m);
             for (const b of extracted) {
-              blocks.push({ ...b, afterIndex });
+              blocks.push({ ...b, afterIndex, sourceIndex });
             }
           }
         } else if (m.role === "custom") {
@@ -988,12 +1186,26 @@ export function createSessionsRoute(engine, hub = null) {
           if (m.display !== false && afterIndex >= pageBounds.startIdx && afterIndex < pageBounds.endIdx) {
             const extracted = extractBlocks(m.customType, m.details, m);
             for (const b of extracted) {
-              blocks.push({ ...b, afterIndex });
+              blocks.push({ ...b, afterIndex, sourceIndex });
             }
           }
           const parsed = parseHistoryDeferredResult(m);
-          recordMediaGenerationResult(parsed, afterIndex);
-          recordDeferredInterlude(parsed, afterIndex);
+          recordMediaGenerationResult(parsed, afterIndex, sourceIndex);
+          if (m.customType === TURN_INPUT_CONSUMPTION_EVENT_TYPE) {
+            recordTurnInputConsumptionInterlude(m, afterIndex, sourceIndex);
+          }
+          if (m.customType === TURN_INPUT_PRESENTATION_EVENT_TYPE) {
+            recordTurnInputPresentationInterlude(m, afterIndex, sourceIndex);
+          }
+          if (m.customType === DEFERRED_RESULT_MESSAGE_TYPE) {
+            const nextAssistantIndex = nextImmediateDisplayableAssistantIndex(sourceMessages, sourceIndex, displayIdx);
+            recordDeferredInterlude(
+              parsed,
+              nextAssistantIndex == null ? null : nextAssistantIndex - 1,
+              historyDeferredDeliveryId(m, sourceIndex),
+              sourceIndex,
+            );
+          }
         }
       }
 
@@ -1002,13 +1214,16 @@ export function createSessionsRoute(engine, hub = null) {
           if (!isTerminalDeferredTask(task)) continue;
           const parsed = buildDeferredResultRecord(task.taskId, task);
           recordMediaGenerationResult(parsed, pageBounds.total - 1);
-          recordDeferredInterlude(parsed, pageBounds.total - 1);
+          recordDeferredInterlude(parsed, null);
         }
       }
-      const resolvedBlocks = resolveMediaGenerationBlocks(
-        blocks,
-        mediaGenerationResults,
-        standaloneMediaGenerationResults,
+      const resolvedBlocks = normalizePluginChatSurfaceBlocks(
+        resolveMediaGenerationBlocks(
+          blocks,
+          mediaGenerationResults,
+          standaloneMediaGenerationResults,
+        ),
+        engine,
       );
 
       // 重映射 afterIndex 到切片内偏移，过滤超出范围的
@@ -1524,7 +1739,13 @@ export function createSessionsRoute(engine, hub = null) {
       }, newSessionPath);
       return c.json(response);
     } catch (err) {
-      return c.json({ error: err.message }, 500);
+      const status = Number.isInteger(err?.status) && err.status >= 400 && err.status < 600
+        ? err.status
+        : 500;
+      return c.json({
+        error: err.message,
+        ...(err?.code ? { code: err.code } : {}),
+      }, status);
     }
   });
 
@@ -1560,8 +1781,9 @@ export function createSessionsRoute(engine, hub = null) {
 
       await engine.switchSession(sessionPath);
 
-      // 恢复目标 session 的浏览器（若有）
-      await bm.resumeForSession(sessionPath);
+      // 恢复目标 session 的浏览器（若有）。无 browser host 的 server/PWA 环境只记录 typed skip；
+      // 一旦判断为可恢复，resumeForSession 内的真实 browser 错误仍会向外抛出。
+      const browserResume = await resumeBrowserForSessionSwitch(bm, sessionPath);
 
       const session = engine.getSessionByPath(sessionPath);
 
@@ -1596,6 +1818,7 @@ export function createSessionsRoute(engine, hub = null) {
         agentName: switchedAgent?.agentName || switchedAgentId,
         browserRunning: bm.isRunning(sessionPath),
         browserUrl: bm.currentUrl(sessionPath) || null,
+        browserResume,
         isStreaming: engine.isSessionStreaming(sessionPath),
         currentModelId: activeModel?.id || null,
         currentModelProvider: activeModel?.provider || null,
@@ -1733,7 +1956,7 @@ export function createSessionsRoute(engine, hub = null) {
         let files;
         try { files = await fs.readdir(archiveDir); } catch { continue; }
         for (const f of files) {
-          if (!f.endsWith(".jsonl")) continue;
+          if (!isSessionJsonlFilename(f)) continue;
           const fp = path.join(archiveDir, f);
           try {
             const stat = await fs.stat(fp);
@@ -1782,39 +2005,60 @@ export function createSessionsRoute(engine, hub = null) {
         return rejectDeletedAgentSession(c);
       }
 
-      // 确认文件存在
-      try {
-        await fs.access(sessionPath);
-      } catch {
-        return c.json({ error: t("error.sessionNotFound") }, 404);
-      }
-
       // 从 session 路径推导归档目录（同 agent 的 sessions/archived/）
       const destPath = archivedPathForActiveSession(sessionPath);
-      const archiveDir = path.dirname(destPath);
-      if (await pathExists(destPath)) {
-        return c.json({ error: "Archived path already exists" }, 409);
-      }
-      if (await pathExists(sessionFileSidecarPath(destPath))) {
-        return c.json({ error: "Stage file sidecar destination already exists" }, 409);
-      }
-      await cleanupSessionLifecycle([sessionPath, destPath], "parent session archived", { skipMemory: true });
+      return await withSessionLifecycleLock([sessionPath, destPath], async () => {
+        const archiveDir = path.dirname(destPath);
+        // 确认文件存在
+        try {
+          await fs.access(sessionPath);
+        } catch {
+          return c.json({ error: t("error.sessionNotFound") }, 404);
+        }
+        if (await pathExists(destPath)) {
+          return c.json({ error: "Archived path already exists" }, 409);
+        }
+        if (await pathExists(sessionFileSidecarPath(destPath))) {
+          return c.json({ error: "Stage file sidecar destination already exists" }, 409);
+        }
+        await cleanupSessionLifecycle([sessionPath, destPath], "parent session archived", { skipMemory: true });
 
-      // 再从 engine 的 session map 中移除。
-      await engine.setSessionPinned(sessionPath, false);
-      await engine.closeSession(sessionPath);
+        // 再从 engine 的 session map 中移除。
+        await engine.setSessionPinned(sessionPath, false);
+        await engine.closeSession(sessionPath);
 
-      await fs.mkdir(archiveDir, { recursive: true });
-      await fs.rename(sessionPath, destPath);
-      moveSessionFileSidecarSync(sessionPath, destPath);
+        await fs.mkdir(archiveDir, { recursive: true });
+        await moveSessionLifecycleOrThrow({
+          fromPath: sessionPath,
+          toPath: destPath,
+          lifecycle: "archived",
+          reason: "session_archive",
+        });
+        try {
+          await fs.rename(sessionPath, destPath);
+          moveSessionFileSidecarSync(sessionPath, destPath);
+        } catch (err) {
+          try {
+            await moveSessionLifecycleOrThrow({
+              fromPath: destPath,
+              toPath: sessionPath,
+              lifecycle: "active",
+              reason: "session_archive_rollback",
+            });
+          } catch (rollbackErr) {
+            lifecycleLog.error(`archive manifest rollback failed for ${sessionPath}: ${rollbackErr.message}`);
+          }
+          throw err;
+        }
 
-      // 将 mtime 置为归档瞬间，使 cleanup 按"归档时间"而非"最后活动时间"判断
-      const nowSec = Date.now() / 1000;
-      await fs.utimes(destPath, nowSec, nowSec);
+        // 将 mtime 置为归档瞬间，使 cleanup 按"归档时间"而非"最后活动时间"判断
+        const nowSec = Date.now() / 1000;
+        await fs.utimes(destPath, nowSec, nowSec);
 
-      return c.json({ ok: true });
+        return c.json({ ok: true });
+      });
     } catch (err) {
-      return c.json({ error: err.message }, 500);
+      return c.json(bodyFromRouteError(err), statusFromRouteError(err));
     }
   });
 
@@ -1843,20 +2087,44 @@ export function createSessionsRoute(engine, hub = null) {
       const activeDir = path.dirname(archDir);
       const destPath = path.join(activeDir, path.basename(sessionPath));
 
-      // 冲突检测：目标位置已存在，不自动改名（违背"禁止非用户预期的 fallback"）
-      try {
-        await fs.access(destPath);
-        return c.json({ error: "Active path already exists" }, 409);
-      } catch { /* 目标不存在，可以恢复 */ }
-      if (await pathExists(sessionFileSidecarPath(destPath))) {
-        return c.json({ error: "Stage file sidecar destination already exists" }, 409);
-      }
+      return await withSessionLifecycleLock([destPath, sessionPath], async () => {
+        try {
+          await fs.access(sessionPath);
+        } catch {
+          return c.json({ error: t("error.sessionNotFound") }, 404);
+        }
 
-      await fs.rename(sessionPath, destPath);
-      moveSessionFileSidecarSync(sessionPath, destPath);
-      return c.json({ ok: true, restoredPath: destPath });
+        await cleanupSessionLifecycle([destPath, sessionPath], "parent session restored", { skipMemory: true });
+
+        // 冲突检测：目标位置已有真实消息时，不自动合并；只有旧 bug 留下的 header-only 文件可修复。
+        await repairHeaderOnlyActiveRestoreTarget(destPath);
+        if (await pathExists(sessionFileSidecarPath(destPath))) {
+          return c.json({ error: "Stage file sidecar destination already exists" }, 409);
+        }
+
+        await fs.rename(sessionPath, destPath);
+        moveSessionFileSidecarSync(sessionPath, destPath);
+        try {
+          await moveSessionLifecycleOrThrow({
+            fromPath: sessionPath,
+            toPath: destPath,
+            lifecycle: "active",
+            reason: "session_restore",
+          });
+        } catch (err) {
+          try {
+            await fs.mkdir(archDir, { recursive: true });
+            await fs.rename(destPath, sessionPath);
+            moveSessionFileSidecarSync(destPath, sessionPath);
+          } catch (rollbackErr) {
+            lifecycleLog.error(`restore file rollback failed for ${destPath}: ${rollbackErr.message}`);
+          }
+          throw err;
+        }
+        return c.json({ ok: true, restoredPath: destPath });
+      });
     } catch (err) {
-      return c.json({ error: err.message }, 500);
+      return c.json(bodyFromRouteError(err), statusFromRouteError(err));
     }
   });
 
@@ -1876,21 +2144,23 @@ export function createSessionsRoute(engine, hub = null) {
         return c.json({ error: "Not an archived session path" }, 403);
       }
       const activeKey = activePathForArchivedSession(sessionPath);
-      await cleanupSessionLifecycle([activeKey, sessionPath], "parent session deleted");
-      try {
-        await fs.unlink(sessionPath);
-        deleteSessionFileSidecarSync(sessionPath);
-      } catch (err) {
-        if (err.code === "ENOENT") {
-          return c.json({ error: t("error.sessionNotFound") }, 404);
+      return await withSessionLifecycleLock([activeKey, sessionPath], async () => {
+        await cleanupSessionLifecycle([activeKey, sessionPath], "parent session deleted");
+        try {
+          await fs.unlink(sessionPath);
+          deleteSessionFileSidecarSync(sessionPath);
+        } catch (err) {
+          if (err.code === "ENOENT") {
+            return c.json({ error: t("error.sessionNotFound") }, 404);
+          }
+          throw err;
         }
-        throw err;
-      }
-      // 清理 titles.json 孤儿（key = 对应的活跃路径）
-      try { await engine.clearSessionTitle(activeKey); } catch {}
-      return c.json({ ok: true });
+        // 清理 titles.json 孤儿（key = 对应的活跃路径）
+        try { await engine.clearSessionTitle(activeKey); } catch {}
+        return c.json({ ok: true });
+      });
     } catch (err) {
-      return c.json({ error: err.message }, 500);
+      return c.json(bodyFromRouteError(err), statusFromRouteError(err));
     }
   });
 
@@ -1951,6 +2221,15 @@ function parseHistoryDeferredResult(message) {
     return parseDeferredResultNotification(message.content);
   }
   return null;
+}
+
+function historyDeferredDeliveryId(message, sourceIndex) {
+  const details = message?.details && typeof message.details === "object" ? message.details : null;
+  const fromDetails = typeof details?.deliveryId === "string" && details.deliveryId.trim()
+    ? details.deliveryId.trim()
+    : null;
+  if (fromDetails) return fromDetails;
+  return `history:${sourceIndex}`;
 }
 
 function isTerminalDeferredTask(task) {

@@ -3,9 +3,13 @@ import path from "path";
 import { createRequire } from "module";
 import { generateSessionId } from "./id.ts";
 import { normalizeSessionLocatorPath, sessionLocatorKey } from "./path-normalizer.ts";
+import {
+  DEFAULT_SESSION_PERMISSION_MODE,
+  normalizeSessionPermissionMode,
+} from "../session-permission-mode.ts";
 
 export const SESSION_MANIFEST_SCHEMA_VERSION = 1;
-export const SESSION_MANIFEST_DB_USER_VERSION = 1;
+export const SESSION_MANIFEST_DB_USER_VERSION = 3;
 
 const require = createRequire(import.meta.url);
 let BetterSqliteDatabase = null;
@@ -43,6 +47,39 @@ function stringifyJson(value, fallback) {
   return JSON.stringify(value ?? fallback);
 }
 
+function normalizeToolNames(value) {
+  if (!Array.isArray(value)) return null;
+  const seen = new Set();
+  const out = [];
+  for (const item of value) {
+    if (typeof item !== "string" || !item || seen.has(item)) continue;
+    seen.add(item);
+    out.push(item);
+  }
+  return out;
+}
+
+function pickString(value) {
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function normalizeExecutorMetadata(value: any = {}) {
+  const source = value && typeof value === "object" && !Array.isArray(value) ? value : {};
+  const executorAgentId = pickString(source.executorAgentId || source.agentId);
+  const executorAgentNameSnapshot = pickString(
+    source.executorAgentNameSnapshot
+    || source.executorAgentName
+    || source.agentNameSnapshot
+    || source.agentName,
+  );
+  if (!executorAgentId && !executorAgentNameSnapshot) return null;
+  return {
+    executorAgentId,
+    executorAgentNameSnapshot,
+    executorMetaVersion: Number.isFinite(source.executorMetaVersion) ? source.executorMetaVersion : 1,
+  };
+}
+
 function defaultMemoryPolicy(input: any = {}) {
   return {
     mode: input.mode || "inherit",
@@ -52,7 +89,7 @@ function defaultMemoryPolicy(input: any = {}) {
 
 function defaultPermissionModeSnapshot(input: any = {}, capturedAt) {
   return {
-    mode: input.mode || "ask",
+    mode: normalizeSessionPermissionMode(input.mode || DEFAULT_SESSION_PERMISSION_MODE),
     source: input.source || "global_default_at_create",
     capturedAt: input.capturedAt || capturedAt,
   };
@@ -104,6 +141,30 @@ function toHistoryLocator(row) {
   };
 }
 
+function toCapabilitySnapshot(row) {
+  if (!row) return null;
+  return {
+    sessionId: row.session_id,
+    toolNames: parseJson(row.tool_names_json, null),
+    promptSnapshot: parseJson(row.prompt_snapshot_json, null),
+    capabilityDriftDismissedFingerprint: row.capability_drift_dismissed_fingerprint ?? null,
+    source: row.source || null,
+    updatedAt: row.updated_at,
+  };
+}
+
+function toExecutorMetadata(row) {
+  if (!row) return null;
+  return {
+    sessionId: row.session_id,
+    executorAgentId: row.executor_agent_id || null,
+    executorAgentNameSnapshot: row.executor_agent_name_snapshot || null,
+    executorMetaVersion: row.executor_meta_version || 1,
+    source: row.source || null,
+    updatedAt: row.updated_at,
+  };
+}
+
 export class SessionManifestStore {
   declare db: any;
   declare _stmts: any;
@@ -118,17 +179,27 @@ export class SessionManifestStore {
     fs.mkdirSync(path.dirname(opts.dbPath), { recursive: true });
     const Database = opts.Database || loadBetterSqliteDatabase();
     this.db = new Database(opts.dbPath);
-    this._now = opts.now || (() => new Date().toISOString());
-    this._idGenerator = opts.idGenerator || (() => generateSessionId());
+    try {
+      this._now = opts.now || (() => new Date().toISOString());
+      this._idGenerator = opts.idGenerator || (() => generateSessionId());
 
-    this.db.pragma("journal_mode = WAL");
-    this.db.pragma("synchronous = NORMAL");
-    this.db.pragma("cache_size = -16000");
-    this.db.pragma("temp_store = MEMORY");
-    this.db.pragma("mmap_size = 30000000");
-    this._initSchema();
-    this._migrate();
-    this._prepareStatements();
+      this.db.pragma("journal_mode = WAL");
+      this.db.pragma("synchronous = NORMAL");
+      this.db.pragma("cache_size = -16000");
+      this.db.pragma("temp_store = MEMORY");
+      this.db.pragma("mmap_size = 30000000");
+      this._initSchema();
+      this._migrate();
+      this._prepareStatements();
+    } catch (error) {
+      try {
+        this.db?.close?.();
+      } catch {
+        // Keep the original initialization error; cleanup failure is secondary.
+      }
+      this.db = null;
+      throw error;
+    }
   }
 
   _initSchema() {
@@ -185,6 +256,26 @@ export class SessionManifestStore {
         key TEXT PRIMARY KEY,
         value_json TEXT NOT NULL,
         updated_at TEXT NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS session_capability_snapshots (
+        session_id TEXT PRIMARY KEY,
+        tool_names_json TEXT,
+        prompt_snapshot_json TEXT,
+        capability_drift_dismissed_fingerprint TEXT,
+        source TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY(session_id) REFERENCES session_manifests(session_id) ON DELETE CASCADE
+      );
+
+      CREATE TABLE IF NOT EXISTS session_executor_metadata (
+        session_id TEXT PRIMARY KEY,
+        executor_agent_id TEXT,
+        executor_agent_name_snapshot TEXT,
+        executor_meta_version INTEGER NOT NULL,
+        source TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY(session_id) REFERENCES session_manifests(session_id) ON DELETE CASCADE
       );
     `);
   }
@@ -307,6 +398,18 @@ export class SessionManifestStore {
           updated_at = @updatedAt
         WHERE session_id = @sessionId
       `),
+      updateLocatorLifecycle: this.db.prepare(`
+        UPDATE session_manifests
+        SET
+          lifecycle = @lifecycle,
+          current_locator_type = @currentLocatorType,
+          current_locator_path = @currentLocatorPath,
+          current_locator_key = @currentLocatorKey,
+          current_locator_reason = @currentLocatorReason,
+          locator_updated_at = @locatorUpdatedAt,
+          updated_at = @updatedAt
+        WHERE session_id = @sessionId
+      `),
       setPinnedAt: this.db.prepare(`
         UPDATE session_manifests
         SET pinned_at = @pinnedAt, updated_at = @updatedAt
@@ -352,6 +455,58 @@ export class SessionManifestStore {
           value_json = excluded.value_json,
           updated_at = excluded.updated_at
       `),
+      getCapabilitySnapshot: this.db.prepare(`
+        SELECT * FROM session_capability_snapshots WHERE session_id = ?
+      `),
+      upsertCapabilitySnapshot: this.db.prepare(`
+        INSERT INTO session_capability_snapshots (
+          session_id,
+          tool_names_json,
+          prompt_snapshot_json,
+          capability_drift_dismissed_fingerprint,
+          source,
+          updated_at
+        ) VALUES (
+          @sessionId,
+          @toolNamesJson,
+          @promptSnapshotJson,
+          @capabilityDriftDismissedFingerprint,
+          @source,
+          @updatedAt
+        )
+        ON CONFLICT(session_id) DO UPDATE SET
+          tool_names_json = excluded.tool_names_json,
+          prompt_snapshot_json = excluded.prompt_snapshot_json,
+          capability_drift_dismissed_fingerprint = excluded.capability_drift_dismissed_fingerprint,
+          source = excluded.source,
+          updated_at = excluded.updated_at
+      `),
+      getExecutorMetadata: this.db.prepare(`
+        SELECT * FROM session_executor_metadata WHERE session_id = ?
+      `),
+      upsertExecutorMetadata: this.db.prepare(`
+        INSERT INTO session_executor_metadata (
+          session_id,
+          executor_agent_id,
+          executor_agent_name_snapshot,
+          executor_meta_version,
+          source,
+          updated_at
+        ) VALUES (
+          @sessionId,
+          @executorAgentId,
+          @executorAgentNameSnapshot,
+          @executorMetaVersion,
+          @source,
+          @updatedAt
+        )
+        ON CONFLICT(session_id) DO UPDATE SET
+          executor_agent_id = excluded.executor_agent_id,
+          executor_agent_name_snapshot = excluded.executor_agent_name_snapshot,
+          executor_meta_version = excluded.executor_meta_version,
+          source = excluded.source,
+          updated_at = excluded.updated_at
+      `),
       list: this.db.prepare("SELECT * FROM session_manifests ORDER BY updated_at DESC"),
     };
   }
@@ -359,7 +514,9 @@ export class SessionManifestStore {
   createForPath(input) {
     const locator = this._locatorFromPath(input.sessionPath);
     const existing = this._findByLocator(locator.key);
-    if (existing) return existing;
+    if (existing) {
+      return this._repairCurrentLocatorForSameKey(existing, locator, input.locatorReason || "create");
+    }
 
     const createdAt = this._now();
     const memoryPolicy = defaultMemoryPolicy(input.memoryPolicy);
@@ -370,7 +527,9 @@ export class SessionManifestStore {
 
     return this.db.transaction(() => {
       const conflict = this._findByLocator(locator.key);
-      if (conflict) return conflict;
+      if (conflict) {
+        return this._repairCurrentLocatorForSameKey(conflict, locator, input.locatorReason || "create");
+      }
 
       const sessionId = this._generateUniqueSessionId();
       this._stmts.insertManifest.run({
@@ -427,7 +586,7 @@ export class SessionManifestStore {
       }
 
       if (manifest.currentLocator.key === nextLocator.key) {
-        return manifest;
+        return this._repairCurrentLocatorForSameKey(manifest, nextLocator, reason);
       }
 
       this._assertLocatorAvailable(nextLocator.key, sessionId);
@@ -450,6 +609,66 @@ export class SessionManifestStore {
         currentLocatorReason: reason,
         locatorUpdatedAt: changedAt,
         updatedAt: changedAt,
+      });
+      return this.getBySessionId(sessionId);
+    })();
+  }
+
+  updateLocatorLifecycle(sessionId, nextSessionPath, lifecycle, reason = "update") {
+    const nextLifecycle = pickString(lifecycle);
+    if (!nextLifecycle) {
+      throw new SessionManifestError(
+        "session_manifest_lifecycle_required",
+        "Session manifest lifecycle is required.",
+        { sessionId, lifecycle },
+      );
+    }
+    const nextLocator = this._locatorFromPath(nextSessionPath);
+    return this.db.transaction(() => {
+      const manifest = this.getBySessionId(sessionId);
+      if (!manifest) {
+        throw new SessionManifestError(
+          "session_manifest_not_found",
+          `Session manifest not found: ${sessionId}`,
+          { sessionId },
+        );
+      }
+
+      if (manifest.currentLocator.key !== nextLocator.key) {
+        this._assertLocatorAvailable(nextLocator.key, sessionId);
+        const changedAt = this._now();
+        this._insertHistoryLocator({
+          sessionId,
+          locatorType: manifest.currentLocator.type,
+          locatorPath: manifest.currentLocator.path,
+          locatorKey: manifest.currentLocator.key,
+          reason,
+          createdAt: changedAt,
+        });
+        this._stmts.deleteHistoryForLocator.run(sessionId, nextLocator.key);
+        this._stmts.updateLocatorLifecycle.run({
+          sessionId,
+          lifecycle: nextLifecycle,
+          currentLocatorType: nextLocator.type,
+          currentLocatorPath: nextLocator.path,
+          currentLocatorKey: nextLocator.key,
+          currentLocatorReason: reason,
+          locatorUpdatedAt: changedAt,
+          updatedAt: changedAt,
+        });
+        return this.getBySessionId(sessionId);
+      }
+
+      const updatedAt = this._now();
+      this._stmts.updateLocatorLifecycle.run({
+        sessionId,
+        lifecycle: nextLifecycle,
+        currentLocatorType: nextLocator.type,
+        currentLocatorPath: nextLocator.path,
+        currentLocatorKey: nextLocator.key,
+        currentLocatorReason: reason,
+        locatorUpdatedAt: updatedAt,
+        updatedAt,
       });
       return this.getBySessionId(sessionId);
     })();
@@ -522,6 +741,76 @@ export class SessionManifestStore {
     return this.getBySessionId(sessionId);
   }
 
+  getCapabilitySnapshot(sessionId) {
+    return toCapabilitySnapshot(this._stmts.getCapabilitySnapshot.get(sessionId));
+  }
+
+  setCapabilitySnapshot(sessionId, snapshot: any = {}, options: any = {}) {
+    const manifest = this.getBySessionId(sessionId);
+    if (!manifest) {
+      throw new SessionManifestError(
+        "session_manifest_not_found",
+        `Session manifest not found: ${sessionId}`,
+        { sessionId },
+      );
+    }
+
+    const existing = this.getCapabilitySnapshot(sessionId);
+    const hasToolNames = Object.prototype.hasOwnProperty.call(snapshot, "toolNames");
+    const hasPromptSnapshot = Object.prototype.hasOwnProperty.call(snapshot, "promptSnapshot");
+    const hasDismissedFingerprint = Object.prototype.hasOwnProperty.call(snapshot, "capabilityDriftDismissedFingerprint");
+    const toolNames = hasToolNames
+      ? normalizeToolNames(snapshot.toolNames)
+      : (existing?.toolNames ?? null);
+    const promptSnapshot = hasPromptSnapshot
+      ? (snapshot.promptSnapshot ?? null)
+      : (existing?.promptSnapshot ?? null);
+    const capabilityDriftDismissedFingerprint = hasDismissedFingerprint
+      ? (typeof snapshot.capabilityDriftDismissedFingerprint === "string"
+        ? snapshot.capabilityDriftDismissedFingerprint
+        : null)
+      : (existing?.capabilityDriftDismissedFingerprint ?? null);
+    const updatedAt = this._now();
+    const source = options.source || snapshot.source || existing?.source || "session_update";
+
+    this._stmts.upsertCapabilitySnapshot.run({
+      sessionId,
+      toolNamesJson: toolNames ? JSON.stringify(toolNames) : null,
+      promptSnapshotJson: promptSnapshot == null ? null : JSON.stringify(promptSnapshot),
+      capabilityDriftDismissedFingerprint,
+      source,
+      updatedAt,
+    });
+    return this.getCapabilitySnapshot(sessionId);
+  }
+
+  getExecutorMetadata(sessionId) {
+    return toExecutorMetadata(this._stmts.getExecutorMetadata.get(sessionId));
+  }
+
+  setExecutorMetadata(sessionId, metadata: any = {}, options: any = {}) {
+    const manifest = this.getBySessionId(sessionId);
+    if (!manifest) {
+      throw new SessionManifestError(
+        "session_manifest_not_found",
+        `Session manifest not found: ${sessionId}`,
+        { sessionId },
+      );
+    }
+    const normalized = normalizeExecutorMetadata(metadata);
+    if (!normalized) return this.getExecutorMetadata(sessionId);
+    const updatedAt = this._now();
+    this._stmts.upsertExecutorMetadata.run({
+      sessionId,
+      executorAgentId: normalized.executorAgentId,
+      executorAgentNameSnapshot: normalized.executorAgentNameSnapshot,
+      executorMetaVersion: normalized.executorMetaVersion,
+      source: options.source || metadata.source || "session_update",
+      updatedAt,
+    });
+    return this.getExecutorMetadata(sessionId);
+  }
+
   list() {
     return this._stmts.list.all().map(toRowManifest);
   }
@@ -549,8 +838,29 @@ export class SessionManifestStore {
     return {
       type: "jsonl",
       path: locatorPath,
-      key: sessionLocatorKey(locatorPath),
+      key: sessionLocatorKey(sessionPath),
     };
+  }
+
+  _repairCurrentLocatorForSameKey(manifest, locator, reason = "repair") {
+    if (!manifest || manifest.currentLocator?.key !== locator.key) return manifest;
+    if (
+      manifest.currentLocator.path === locator.path
+      && manifest.currentLocator.type === locator.type
+    ) {
+      return manifest;
+    }
+    const updatedAt = this._now();
+    this._stmts.updateLocator.run({
+      sessionId: manifest.sessionId,
+      currentLocatorType: locator.type,
+      currentLocatorPath: locator.path,
+      currentLocatorKey: locator.key,
+      currentLocatorReason: reason,
+      locatorUpdatedAt: updatedAt,
+      updatedAt,
+    });
+    return this.getBySessionId(manifest.sessionId);
   }
 
   _findByLocator(locatorKey) {

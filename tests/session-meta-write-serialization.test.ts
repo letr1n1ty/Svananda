@@ -206,11 +206,14 @@ describe("SessionCoordinator.writeSessionMeta serialization", () => {
     expect(payloadFiles.some((name) => name.endsWith(".promptSnapshot.json"))).toBe(true);
   });
 
-  it("quarantines an oversized legacy session-meta file before writing a fresh small index (#1681)", async () => {
+  it("compacts an oversized legacy session-meta file instead of dropping unrelated entries (#1681)", async () => {
     const metaPath = path.join(sessionDir, "session-meta.json");
+    const legacySessionPath = path.join(sessionDir, "legacy.jsonl");
+    const largePrompt = "legacy ".repeat(220_000);
     await fsp.writeFile(metaPath, JSON.stringify({
-      legacy: {
-        promptSnapshot: { systemPrompt: "x".repeat(1_200_000) },
+      "legacy.jsonl": {
+        memoryEnabled: true,
+        promptSnapshot: { systemPrompt: largePrompt },
       },
     }), "utf-8");
 
@@ -218,10 +221,45 @@ describe("SessionCoordinator.writeSessionMeta serialization", () => {
 
     const meta = JSON.parse(await fsp.readFile(metaPath, "utf-8"));
     expect(meta[path.basename(fakeSessionPath)].memoryEnabled).toBe(false);
+    expect(meta[path.basename(legacySessionPath)].memoryEnabled).toBe(true);
+    expect(meta[path.basename(legacySessionPath)].promptSnapshot).toMatchObject({
+      kind: "session-meta-payload",
+      field: "promptSnapshot",
+    });
     expect(JSON.stringify(meta).length).toBeLessThan(20_000);
 
     const files = await fsp.readdir(sessionDir);
-    expect(files.some((name) => /^session-meta\.oversized\.\d+\.json$/.test(name))).toBe(true);
+    expect(files.some((name) => /^session-meta\.oversized\.\d+\.json$/.test(name))).toBe(false);
+
+    const hydrated = await sessionCoord._readMetaCached(metaPath);
+    expect(hydrated[path.basename(legacySessionPath)].promptSnapshot.systemPrompt).toBe(largePrompt);
+  });
+
+  it("externalizes medium prompt snapshots when the aggregate meta index exceeds its budget", async () => {
+    const mediumPrompt = "context ".repeat(20_000);
+    const sessionPaths = Array.from({ length: 10 }, (_, index) => path.join(sessionDir, `aggregate-${index}.jsonl`));
+
+    for (const sessionPath of sessionPaths) {
+      await sessionCoord.writeSessionMeta(sessionPath, {
+        memoryEnabled: true,
+        promptSnapshot: {
+          version: 1,
+          systemPrompt: mediumPrompt,
+          appendSystemPrompt: [],
+          skillsResult: { skills: [], diagnostics: [] },
+          agentsFilesResult: { agentsFiles: [] },
+        },
+      });
+    }
+
+    const metaPath = path.join(sessionDir, "session-meta.json");
+    const rawMeta = JSON.parse(await fsp.readFile(metaPath, "utf-8"));
+    expect(Buffer.byteLength(JSON.stringify(rawMeta, null, 2), "utf-8")).toBeLessThan(1024 * 1024);
+    expect(Object.values(rawMeta).some((entry: any) => entry.promptSnapshot?.kind === "session-meta-payload"))
+      .toBe(true);
+
+    const hydrated = await sessionCoord._readMetaCached(metaPath);
+    expect(hydrated[path.basename(sessionPaths[0])].promptSnapshot.systemPrompt).toBe(mediumPrompt);
   });
 
   it("setSessionPinned writes and clears pinnedAt on the session meta entry", async () => {

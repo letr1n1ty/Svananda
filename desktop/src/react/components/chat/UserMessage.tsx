@@ -5,6 +5,7 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { MarkdownContent } from './MarkdownContent';
 import { MessageFooterActions, formatMessageTime, type MessageFooterAction } from './MessageFooterActions';
+import { useMessageFooterActions } from './MessageActions';
 import { AttachmentChip } from '../shared/AttachmentChip';
 import { AudioAttachmentChip } from '../shared/AudioAttachmentChip';
 import { FileKindIcon } from '../shared/FileKindIcon';
@@ -20,6 +21,8 @@ import { AgentAvatar, resolveAgentDisplayInfo } from '../../utils/agent-display'
 import { replayLatestUserMessage, branchFromMessage } from '../../stores/message-turn-actions';
 import styles from './Chat.module.css';
 import badgeStyles from '../input/SkillBadgeView.module.css';
+
+const lazyScreenshot = () => import('../../utils/screenshot').then(m => m.takeScreenshot);
 
 interface Props {
   message: ChatMessage;
@@ -89,6 +92,11 @@ export const UserMessage = memo(function UserMessage({
     }).catch(() => {});
   }, [message.text, sessionPath]);
 
+  const handleScreenshot = useCallback(async () => {
+    const fn = await lazyScreenshot();
+    fn(message.id, sessionPath);
+  }, [message.id, sessionPath]);
+
   const handleRegenerate = useCallback(async () => {
     if (busy || isStreaming) return;
     setBusy(true);
@@ -151,15 +159,16 @@ export const UserMessage = memo(function UserMessage({
       disabled: busy || !editValue.trim(),
     },
   ], [busy, editValue, handleCancelEdit, handleConfirmEdit, t]);
+  const standardMessageActions = useMessageFooterActions({
+    messageId: message.id,
+    sessionPath,
+    onCopy: handleCopy,
+    onScreenshot: () => { void handleScreenshot(); },
+    copied,
+    isStreaming: isStreaming || busy,
+  });
+  const messageActions = readOnly || editing ? [] : standardMessageActions;
   const latestActions: MessageFooterAction[] = useMemo(() => canShowLatestActions ? [
-    {
-      id: 'copy',
-      title: t('common.copyText'),
-      icon: copied ? <CheckIcon /> : <CopyIcon />,
-      onClick: () => handleCopy(),
-      disabled: isStreaming || busy,
-      active: copied,
-    },
     {
       id: 'regenerate',
       title: t('common.regenerate'),
@@ -174,7 +183,7 @@ export const UserMessage = memo(function UserMessage({
       onClick: () => handleEdit(),
       disabled: isStreaming || busy,
     },
-  ] : [], [busy, canShowLatestActions, copied, handleCopy, handleEdit, handleRegenerate, isStreaming, t]);
+  ] : [], [busy, canShowLatestActions, handleEdit, handleRegenerate, isStreaming, t]);
   const branchAction: MessageFooterAction[] = useMemo(() => (
     !readOnly && !!message.sourceEntryId && !editing ? [{
       id: 'branch',
@@ -253,12 +262,14 @@ export const UserMessage = memo(function UserMessage({
           )}
         </div>
       )}
-      {(timeText || footerActions.length > 0) && (
+      {(timeText || messageActions.length > 0 || footerActions.length > 0) && (
         <MessageFooterActions
           align="right"
           timeText={timeText}
+          leadingActions={footerActions}
           visible={editing}
-          actions={footerActions}
+          actions={messageActions}
+          testId="user-message-footer-actions"
         />
       )}
     </div>
@@ -381,15 +392,6 @@ function GridIcon() {
       <line x1="18" y1="4" x2="18" y2="20" />
       <line x1="6" y1="8" x2="18" y2="8" />
       <line x1="6" y1="16" x2="18" y2="16" />
-    </svg>
-  );
-}
-
-function CopyIcon() {
-  return (
-    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
-      <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
-      <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
     </svg>
   );
 }

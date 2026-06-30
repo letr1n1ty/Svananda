@@ -45,18 +45,18 @@ describe('theme-registry', () => {
   });
 
   describe('THEMES 完整性', () => {
-    // 原始 10 個自訂主題（上游合併後主題總數大幅增加，但這些必須保留）
+    // 原始 11 個自訂主題，包含上游新增的 coral（上游合併後主題總數大幅增加，但這些必須保留）
     const ORIGINAL_THEMES = [
-      'absolutely', 'contemplation', 'deep-think',
+      'absolutely', 'contemplation', 'coral', 'deep-think',
       'delve', 'grass-aroma', 'high-contrast', 'midnight', 'midnight-contrast',
       'new-warm-paper', 'warm-paper',
     ];
 
-    it('至少含 10 個原始自訂主題', () => {
-      expect(Object.keys(reg.THEMES).length).toBeGreaterThanOrEqual(10);
+    it('至少含 11 個自訂主題', () => {
+      expect(Object.keys(reg.THEMES).length).toBeGreaterThanOrEqual(11);
     });
 
-    it('包含所有原始自訂主題 id', () => {
+    it('包含所有自訂主題 id', () => {
       const ids = Object.keys(reg.THEMES);
       for (const id of ORIGINAL_THEMES) {
         expect(ids, `缺少原始主題: ${id}`).toContain(id);
@@ -64,7 +64,7 @@ describe('theme-registry', () => {
     });
 
     it.each(['warm-paper', 'midnight', 'high-contrast', 'grass-aroma',
-             'contemplation', 'absolutely', 'delve', 'deep-think', 'new-warm-paper',
+             'contemplation', 'absolutely', 'delve', 'deep-think', 'new-warm-paper', 'coral',
              'midnight-contrast'])(
       '"%s" 每条都有完整字段',
       (id) => {
@@ -98,6 +98,7 @@ describe('theme-registry', () => {
       expect(reg.migrateSavedTheme('warm-paper')).toBe('warm-paper');
       expect(reg.migrateSavedTheme('midnight')).toBe('midnight');
       expect(reg.migrateSavedTheme('new-warm-paper')).toBe('new-warm-paper');
+      expect(reg.migrateSavedTheme('coral')).toBe('coral');
     });
 
     it('旧新暖纸主题 id 迁移到新 id', () => {
@@ -168,6 +169,7 @@ describe('theme-registry', () => {
       expect(opts).toHaveLength(themeCount + 1); // themes + auto option
       expect(opts.map(o => o.id).sort()).toContain('auto');
       expect(opts.map(o => o.id).sort()).toContain('warm-paper');
+      expect(opts.map(o => o.id).sort()).toContain('coral');
       opts.forEach(o => {
         expect(o).toHaveProperty('id');
         expect(o).toHaveProperty('i18nName');

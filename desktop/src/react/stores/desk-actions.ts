@@ -12,9 +12,14 @@ import type { WorkspaceDeskState } from './desk-slice';
 import {
   hydratePersistedPreviewItems,
   loadPersistedWorkspaceUiState,
+  readingPositionsFromPersistedWorkspaceUiState,
   schedulePersistCurrentWorkspaceUiState,
 } from './workspace-ui-state-actions';
-import { hasServerConnection } from '../services/server-connection';
+import {
+  hasServerConnection,
+  isLocalOwnerConnection,
+  resolveServerConnection,
+} from '../services/server-connection';
 import { isWebRuntime } from '../utils/platform-runtime';
 import { mergeWorkspaceHistory, normalizeWorkspacePath } from '../../../../shared/workspace-history.ts';
 
@@ -48,6 +53,15 @@ function deskStateRootKey(root: string | null | undefined, mountId: string | nul
 function activeDeskMountId(s: ReturnType<typeof useStore.getState>, overrideMountId?: string | null): string | null {
   if (overrideMountId !== undefined) return normalizeMountId(overrideMountId);
   return normalizeMountId(s.deskWorkspaceMountId);
+}
+
+function canUseNativeDeskPath(s: ReturnType<typeof useStore.getState>): boolean {
+  const connection = resolveServerConnection(s);
+  return !connection || isLocalOwnerConnection(connection);
+}
+
+function shouldUseWorkbenchDeskAction(s: ReturnType<typeof useStore.getState>): boolean {
+  return isWebRuntime() || !!activeDeskMountId(s) || !canUseNativeDeskPath(s);
 }
 
 function activeDeskRoot(s: ReturnType<typeof useStore.getState>, overrideDir?: string | null): string | undefined {
@@ -210,6 +224,10 @@ function buildWorkspaceDeskState(s: ReturnType<typeof useStore.getState>): Works
   const activeTabId = s.activeTabId && openTabs.includes(s.activeTabId)
     ? s.activeTabId
     : (openTabs[0] || null);
+  const openTabSet = new Set(openTabs);
+  const previewReadingPositions = Object.fromEntries(
+    Object.entries(s.previewReadingPositions || {}).filter(([id]) => openTabSet.has(id)),
+  );
   return {
     deskCurrentPath: '',
     deskFiles: [...(s.deskFiles || [])],
@@ -225,6 +243,7 @@ function buildWorkspaceDeskState(s: ReturnType<typeof useStore.getState>): Works
     previewOpen: !!s.previewOpen,
     openTabs,
     activeTabId,
+    previewReadingPositions,
   };
 }
 
@@ -284,6 +303,7 @@ export async function activateWorkspaceDesk(root: string | null | undefined, opt
       previewOpen: false,
       openTabs: [],
       activeTabId: null,
+      previewReadingPositions: {},
     });
     updateDeskContextBtn();
     return;
@@ -315,6 +335,7 @@ export async function activateWorkspaceDesk(root: string | null | undefined, opt
     previewOpen: saved?.previewOpen ?? false,
     openTabs: savedOpenTabs,
     activeTabId: activePreviewTabId(savedOpenTabs, saved?.activeTabId),
+    previewReadingPositions: saved?.previewReadingPositions || {},
   });
   updateDeskContextBtn();
 
@@ -324,6 +345,7 @@ export async function activateWorkspaceDesk(root: string | null | undefined, opt
     const restoredPreviewItemsById = new Map(restoredPreviewItems.map(item => [item.id, item]));
     const restoredOpenTabs = persisted?.openTabs?.filter(id => restoredPreviewItemsById.has(id)) || [];
     const restoredActiveTabId = activePreviewTabId(restoredOpenTabs, persisted?.activeTabId);
+    const restoredReadingPositions = readingPositionsFromPersistedWorkspaceUiState(persisted, restoredOpenTabs);
     if (persisted && deskStateRootKey(useStore.getState().deskBasePath, useStore.getState().deskWorkspaceMountId) === workspaceKey) {
       useStore.setState((state: any) => ({
         deskCurrentPath: '',
@@ -335,6 +357,7 @@ export async function activateWorkspaceDesk(root: string | null | undefined, opt
         previewOpen: !!persisted.previewOpen,
         openTabs: restoredOpenTabs,
         activeTabId: restoredActiveTabId,
+        previewReadingPositions: restoredReadingPositions,
         ...(restoredPreviewItems.length > 0
           ? {
               previewItems: [
@@ -522,14 +545,14 @@ async function blobToBase64(blob: Blob): Promise<string> {
   return btoa(binary);
 }
 
-export async function loadDeskTreeFiles(subdir = '', options: { force?: boolean; overrideDir?: string | null; overrideMountId?: string | null } = {}): Promise<void> {
+export async function loadDeskTreeFiles(subdir = '', options: { force?: boolean; overrideDir?: string | null; overrideMountId?: string | null } = {}): Promise<boolean> {
   const s = useStore.getState();
-  if (!hasServerConnection(s)) return;
+  if (!hasServerConnection(s)) return false;
   const mountId = activeDeskMountId(s, options.overrideMountId);
   const dir = mountId ? undefined : activeDeskRoot(s, options.overrideDir);
   const normalizedSubdir = normalizeSubdir(subdir);
   const cached = s.deskTreeFilesByPath?.[normalizedSubdir];
-  if (cached && !options.force) return;
+  if (cached && !options.force) return true;
 
   const key = deskTreeLoadKey(mountId ? studioWorkspaceKey(mountId) : dir, normalizedSubdir);
   const myVersion = (_deskTreeLoadVersion.get(key) || 0) + 1;
@@ -547,7 +570,7 @@ export async function loadDeskTreeFiles(subdir = '', options: { force?: boolean;
     const qs = params.toString() ? `?${params}` : '';
     const res = await hanaFetch(`${mountId ? '/api/workbench/files' : '/api/desk/files'}${qs}`);
     const data = await res.json();
-    if (_deskTreeLoadVersion.get(key) !== myVersion) return;
+    if (_deskTreeLoadVersion.get(key) !== myVersion) return false;
     if (data.error) throw new Error(String(data.error));
     const st = useStore.getState();
     if (mountId) {
@@ -563,9 +586,11 @@ export async function loadDeskTreeFiles(subdir = '', options: { force?: boolean;
     }
     st.setDeskTreeFiles(normalizedSubdir, data.files || []);
     if (!normalizedSubdir) st.setDeskFiles(data.files || []);
+    return true;
   } catch (err) {
     console.error('[desk-tree] load failed:', err);
-    if (_deskTreeLoadVersion.get(key) !== myVersion) return;
+    if (_deskTreeLoadVersion.get(key) !== myVersion) return false;
+    return false;
   }
 }
 
@@ -1002,7 +1027,7 @@ export async function deskRenameTreeItem(sourceSubdir: string, oldName: string, 
 
 export async function deskTrashTreeItems(items: DeskTreeMoveItem[]): Promise<boolean> {
   const s = useStore.getState();
-  if (isWebRuntime() || activeDeskMountId(s)) {
+  if (shouldUseWorkbenchDeskAction(s)) {
     return deskSafeDeleteMobileWorkbenchItems(items);
   }
   const trashItem = window.platform?.trashItem;

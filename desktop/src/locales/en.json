@@ -276,16 +276,10 @@
     "send": "Send",
     "steer": "Steer",
     "stop": "Stop",
-    "queue": "Queue",
-    "queueTooltip": "Queue message (Option+Enter to steer instead)",
-    "queuedCount": "{count} queued",
-    "queueAdded": "Message queued",
     "browserScreenshot": "Browser screenshot",
     "compacting": "Compacting context",
     "visionAuxiliary": "Vision auxiliary",
     "fileExpired": "File expired",
-    "branchFromHere": "Branch from here",
-    "branchSwitched": "Switched to this branch",
     "fileActions": {
       "more": "More file actions",
       "revealInFinder": "Reveal in file manager",
@@ -316,7 +310,13 @@
       "fallbackAssistant": "Assistant message"
     },
     "modelSwitching": "Switching model, please wait",
-    "unknownCommand": "[Unknown command] {text}"
+    "unknownCommand": "[Unknown command] {text}",
+    "queue": "Queue",
+    "queueTooltip": "Queue message (Option+Enter to steer instead)",
+    "queuedCount": "{count} queued",
+    "queueAdded": "Message queued",
+    "branchFromHere": "Branch from here",
+    "branchSwitched": "Switched to this branch"
   },
   "time": {
     "justNow": "Just now",
@@ -504,9 +504,9 @@
   },
   "yuan": {
     "types": {
-      "hanako": {
+      "svananda": {
         "label": "Balanced assistant",
-        "avatar": "Hanako.png"
+        "avatar": "Svananda.png"
       },
       "butter": {
         "label": "More expressive",
@@ -947,6 +947,9 @@
       "modelPersonaTitle": "Models & Persona",
       "modelPersonaDescription": "Observe how providers adapt to Svananda's persona, mood, and output contracts.",
       "memoryTitle": "Cache Memory",
+      "memorySectionDescription": "Experimental memory-system capabilities. Once stable, they move into the memory settings where they belong.",
+      "toolsTitle": "Agent Tools",
+      "toolsSectionDescription": "Control the file access path used by agent tools. When enabled, only new sessions use the new path.",
       "description": "Forward-looking features land here first. Once stable, they move to the settings page where they belong.",
       "empty": "No visible experiments",
       "owner": {
@@ -984,6 +987,10 @@
         "summaryTitle": "Rolling Summary Preview",
         "emptyPreview": "No observation yet",
         "clearObservation": "Clear observation"
+      },
+      "editableMemory": {
+        "title": "Editable Memory",
+        "description": "When enabled, Facts in current memory are split into an editable area while the agent keeps reading timeline sections from read-only summaries."
       },
       "compaction": {
         "title": "Compaction mode",
@@ -1026,14 +1033,22 @@
       "newWarmPaperMode": "Paper",
       "midnightContrast": "Aoi Night Contrast",
       "midnightContrastMode": "Clear",
-      "opencodeDark": "OpenCode",
-      "opencodeDarkMode": "Dark",
-      "opencodeLight": "OpenCode",
-      "opencodeLightMode": "Light",
+      "coral": "Coral",
+      "coralMode": "Spring Paper",
       "auto": "Auto",
       "autoMode": "System",
       "font": "Font",
       "fontHint": "Choose the font used for body reading.",
+      "readingLayout": "Reading Layout",
+      "documentWidth": "Document Width",
+      "documentWidthHint": "Controls the maximum width for Markdown editing and preview body text.",
+      "chatWidth": "Chat Width",
+      "chatWidthHint": "Controls the maximum width for chat messages and the composer.",
+      "readingWidth": "Reading Width",
+      "readingWidthHint": "Controls the maximum width for Markdown editing, preview, and chat text.",
+      "readingWidthUnlimited": "Full",
+      "bodyFontSizeOffset": "Body Size",
+      "bodyFontSizeOffsetHint": "Adjusts chat body text relative to the default size.",
       "serifFont": "Serif Font",
       "serifFontHint": "Use serif font for body text",
       "paperTexture": "Paper Texture",
@@ -1041,6 +1056,10 @@
       "paperTextureDarkDisabledHint": "Paper texture is unavailable in night themes and will return with your saved setting in light themes",
       "leavesOverlay": "Sunny Mode",
       "leavesOverlayHint": "Go touch some grass (and sunlight)",
+      "opencodeDark": "OpenCode",
+      "opencodeDarkMode": "Dark",
+      "opencodeLight": "OpenCode",
+      "opencodeLightMode": "Light",
       "opencodeAyuLight": "OpenCode Ayu",
       "opencodeAyuLightMode": "Light",
       "opencodeAyuDark": "OpenCode Ayu",
@@ -1193,6 +1212,9 @@
       "system": "System",
       "hardwareAcceleration": "Hardware Acceleration",
       "hardwareAccelerationHint": "Use the GPU to render app windows. Turning this off takes effect on next launch and uses software rendering for Windows GPU-driver startup recovery.",
+      "sidebar": "Sidebar",
+      "sessionListSingleLine": "Single-line session list",
+      "sessionListSingleLineHint": "When enabled, each session uses one row. Hovering reveals the right-side actions while the title shortens with an ellipsis.",
       "shortcuts": "Shortcuts",
       "voiceRecordingShortcut": "Voice recording/send",
       "voiceRecordingShortcutHint": "When the main chat page is focused, press once to start recording, then press again to finish and send."
@@ -1201,6 +1223,9 @@
       "title": "Editor",
       "markdownFont": "Font",
       "markdownFontHint": "Follow the appearance reading font by default, or choose one just for the editor.",
+      "markdownContentWidth": "Body Width",
+      "markdownContentWidthHint": "Controls the maximum width for Markdown editing and preview body text.",
+      "markdownContentWidthUnlimited": "Full",
       "markdownBodyFontSize": "Body Size",
       "markdownBodyFontSizeHint": "Markdown body text defaults to 15px.",
       "markdownHeading1FontSize": "Heading 1 Size",
@@ -1764,6 +1789,15 @@
       "compiledEmpty": "No compiled memories yet",
       "compiledClear": "Clear",
       "compiledCleared": "Compiled memory cleared",
+      "editableFactsLabel": "Key Facts",
+      "saveFacts": "Save Facts",
+      "factsSaved": "Facts saved",
+      "readonlyTimelineTitle": "Timeline Memory",
+      "sections": {
+        "today": "Today",
+        "week": "Earlier this week",
+        "longterm": "Long-term context"
+      },
       "health": {
         "healthy": "Memory maintenance is healthy",
         "degraded": "Memory maintenance is delayed",
@@ -2121,6 +2155,12 @@
       "feishuAppId": "App ID",
       "feishuAppSecret": "App Secret",
       "feishuHint": "Get from Feishu Open Platform; events use long connection, no local callback URL needed",
+      "dingtalk": "DingTalk",
+      "dingtalkClientId": "Client ID / AppKey",
+      "dingtalkClientSecret": "Client Secret / AppSecret",
+      "dingtalkRobotCode": "Robot Code",
+      "dingtalkRestBaseUrl": "REST Base URL",
+      "dingtalkHint": "Internal app credentials are used for token/Stream; Robot Code is used for Enterprise bot sends; REST Base URL defaults to https://api.dingtalk.io/v1.0",
       "whatsapp": "WhatsApp",
       "qq": "QQ",
       "qqAppId": "App ID",
@@ -2149,6 +2189,7 @@
       "testFail": "Test failed",
       "noToken": "Please enter Bot Token first",
       "noCredentials": "Please enter App ID and App Secret first",
+      "noDingtalkCredentials": "Please enter Client ID, Client Secret, Robot Code, and REST Base URL first",
       "globalSettings": "Global Settings",
       "agentSettings": "Agents",
       "permissionMode": "Permission mode",
@@ -2189,6 +2230,14 @@
         "Click \"Add Event\", add <code>im.message.receive_v1</code> (receive messages)",
         "Important: Go to \"Version Management\", create and publish a version first (long connection config requires a published app)",
         "Paste the App ID and App Secret into the input fields above and turn on the switch"
+      ],
+      "tutorialDtSteps": [
+        "Go to <code>open.dingtalk.com</code> and open the Developer Console",
+        "Create an internal enterprise app, then copy <code>Client ID/AppKey</code> and <code>Client Secret/AppSecret</code> from app credentials",
+        "Add the app robot capability and copy the <code>Robot Code</code> from the robot details",
+        "Make sure the app has the robot message permissions it needs and is published to the target enterprise scope",
+        "Keep REST Base URL as <code>https://api.dingtalk.io/v1.0</code> unless you intentionally use a DingTalk-compatible gateway",
+        "Paste Client ID, Client Secret, Robot Code, and REST Base URL into the fields above, test the connection, then turn on the switch"
       ],
       "whatsappHint": "Coming soon"
     },
@@ -2242,7 +2291,7 @@
       "userLabel": "What should I call you?",
       "placeholder": "Your name",
       "agentLabel": "What should this Agent be called?",
-      "agentPlaceholder": "Hanako",
+      "agentPlaceholder": "Svananda",
       "memoryTitle": "Memory system",
       "memoryHint": "When enabled, the system reviews chats after they end and turns them into memory. Because memory updates often, model cache hit rates may be lower. Turning memory off is usually cheaper.",
       "back": "Back",
@@ -2442,7 +2491,20 @@
     "cut": "Cut",
     "copy": "Copy",
     "paste": "Paste",
-    "selectAll": "Select All"
+    "selectAll": "Select All",
+    "undo": "Undo",
+    "redo": "Redo",
+    "bold": "Bold",
+    "italic": "Italic",
+    "strikethrough": "Strikethrough",
+    "inlineCode": "Inline Code",
+    "heading1": "Heading 1",
+    "heading2": "Heading 2",
+    "heading3": "Heading 3",
+    "blockquote": "Blockquote",
+    "codeBlock": "Code Block",
+    "horizontalRule": "Horizontal Rule",
+    "list": "List"
   },
   "rightWorkspace": {
     "activity": {
@@ -2965,6 +3027,9 @@
       "thinkingBudget": "Thinking Depth",
       "memory": "Memory System",
       "memoryDesc": "Enable/disable memory for current Agent",
+      "memoryFacts": "Memory Facts",
+      "memoryFactsDesc": "Editable current-memory Facts for this Agent. Requires the Editable Memory experiment.",
+      "memoryFactsDisabled": "Editable Memory experiment is disabled.",
       "experience": "Experience",
       "experienceDesc": "Enable/disable the current Agent's experience library",
       "agentName": "Agent Name",

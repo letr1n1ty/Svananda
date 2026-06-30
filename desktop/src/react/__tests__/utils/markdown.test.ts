@@ -130,6 +130,27 @@ describe('renderMarkdown', () => {
     expect(html).toContain('<a href="https://example.com/path%E3%80%82">链接</a>');
   });
 
+  it('keeps local file names from becoming auto-linkified domains', () => {
+    const html = renderMarkdown('参考 README.md、笔记.md、package.json、./docs/ARCHITECTURE.md 和 C:\\work\\config.ts');
+    const previewHtml = renderMarkdownPreview('参考 README.md、笔记.md、package.json、./docs/ARCHITECTURE.md');
+
+    expect(html).toContain('README.md');
+    expect(html).toContain('笔记.md');
+    expect(html).toContain('package.json');
+    expect(html).toContain('./docs/ARCHITECTURE.md');
+    expect(html).toContain('C:\\work\\config.ts');
+    expect(html).not.toContain('<a ');
+    expect(previewHtml).not.toContain('<a ');
+  });
+
+  it('keeps normal fuzzy links and explicit markdown file labels clickable', () => {
+    const html = renderMarkdown('访问 openai.com、www.example.com 和 [README.md](https://example.com/readme)');
+
+    expect(html).toContain('<a href="http://openai.com">openai.com</a>');
+    expect(html).toContain('<a href="http://www.example.com">www.example.com</a>');
+    expect(html).toContain('<a href="https://example.com/readme">README.md</a>');
+  });
+
   it('renders filtered HTML in markdown preview mode', () => {
     const html = renderMarkdownPreview([
       '<div style="background: #f0f7ff; border: 1px solid #bee1e6; border-radius: 8px; padding: 16px; margin: 12px 0;">',
@@ -144,8 +165,45 @@ describe('renderMarkdown', () => {
 
     expect(html).toContain('<div style="background: #f0f7ff; border: 1px solid #bee1e6; border-radius: 8px; padding: 16px; margin: 12px 0">');
     expect(html).toContain('<center>总结</center>');
-    expect(html).toContain('<h3>会计基础 知识框架</h3>');
+    expect(html).toContain('<h3 id="会计基础-知识框架">会计基础 知识框架</h3>');
     expect(html).toContain('└─ 借贷记账法');
+  });
+
+  it('adds stable heading ids in markdown preview mode', () => {
+    const html = renderMarkdownPreview([
+      '# 概览',
+      '',
+      '## Same Title',
+      '',
+      '## Same Title',
+    ].join('\n'));
+
+    expect(html).toContain('<h1 id="概览">概览</h1>');
+    expect(html).toContain('<h2 id="same-title">Same Title</h2>');
+    expect(html).toContain('<h2 id="same-title-1">Same Title</h2>');
+  });
+
+  it('wraps markdown tables in a constrained horizontal scroll container', () => {
+    const html = renderMarkdown([
+      '| 时间 | 处理方式 |',
+      '| --- | --- |',
+      '| 6~10s 连续叙事 | 合并成一个大分镜，内部分镜头一、镜头二 |',
+    ].join('\n'));
+
+    expect(html).toContain('<div class="markdown-table-scroll">');
+    expect(html).toContain('<table>');
+    expect(html).toContain('</table>\n</div>');
+  });
+
+  it('preserves markdown table scroll containers in preview mode', () => {
+    const html = renderMarkdownPreview([
+      '| 时间 | 处理方式 |',
+      '| --- | --- |',
+      '| 6~10s 连续叙事 | 合并成一个大分镜，内部分镜头一、镜头二 |',
+    ].join('\n'));
+
+    expect(html).toContain('<div class="markdown-table-scroll">');
+    expect(html).toContain('</table>\n</div>');
   });
 
   it('removes dangerous HTML from markdown preview output', () => {

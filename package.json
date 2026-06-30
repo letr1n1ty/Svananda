@@ -1,6 +1,6 @@
 {
-  "name": "hanako",
-  "version": "0.330.2",
+  "name": "svananda",
+  "version": "0.348.11",
   "type": "module",
   "description": "Svananda - a personal AI agent with memory and soul",
   "license": "Apache-2.0",
@@ -211,7 +211,7 @@
       {
         "provider": "github",
         "owner": "liliMozi",
-        "repo": "openhanako"
+        "repo": "opensvananda"
       }
     ],
     "win": {

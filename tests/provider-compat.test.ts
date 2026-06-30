@@ -897,6 +897,98 @@ describe("normalizeProviderPayload — 通用层", () => {
     expect(result).not.toHaveProperty("reasoning_effort");
     expect(result).not.toHaveProperty("max_completion_tokens");
   });
+
+  it("OpenCode Go GLM first-turn payload enables thinking without clear_thinking", () => {
+    const payload = {
+      model: "glm-5.2",
+      messages: [{ role: "user", content: "hi" }],
+      reasoning_effort: "high",
+    };
+
+    const result = normalizeProviderPayload(payload, {
+      id: "glm-5.2",
+      provider: "opencode-go",
+      api: "openai-completions",
+      baseUrl: "https://opencode.ai/zen/go/v1",
+      reasoning: true,
+      compat: { thinkingFormat: "zhipu", reasoningProfile: "zhipu-openai" },
+    }, { mode: "chat", reasoningLevel: "high" });
+
+    expect(result.thinking).toEqual({ type: "enabled" });
+    expect(result).not.toHaveProperty("reasoning_effort");
+    expect(payload).not.toHaveProperty("thinking");
+  });
+
+  it("OpenCode Go GLM replay preserves reasoning_content without clear_thinking=false", () => {
+    const payload = {
+      model: "glm-5.2",
+      messages: [
+        { role: "user", content: "需要查天气" },
+        {
+          role: "assistant",
+          content: [{ type: "thinking", thinking: "Need to call the weather tool." }],
+          tool_calls: [{
+            id: "call_1",
+            type: "function",
+            function: { name: "weather", arguments: "{}" },
+          }],
+        },
+        { role: "tool", tool_call_id: "call_1", content: "sunny" },
+        { role: "user", content: "继续" },
+      ],
+      reasoning_effort: "high",
+    };
+
+    const result = normalizeProviderPayload(payload, {
+      id: "glm-5.2",
+      provider: "opencode-go",
+      api: "openai-completions",
+      baseUrl: "https://opencode.ai/zen/go/v1",
+      reasoning: true,
+      compat: { thinkingFormat: "zhipu", reasoningProfile: "zhipu-openai" },
+    }, { mode: "chat", reasoningLevel: "high" });
+
+    expect(result.thinking).toEqual({ type: "enabled" });
+    expect(result.thinking).not.toHaveProperty("clear_thinking");
+    expect(result.messages[1]).toMatchObject({
+      content: "",
+      reasoning_content: "Need to call the weather tool.",
+    });
+    expect(payload.messages[1]).not.toHaveProperty("reasoning_content");
+  });
+
+  it("Zhipu GLM replay still sends clear_thinking=false for preserved thinking", () => {
+    const payload = {
+      model: "glm-5.2",
+      messages: [
+        { role: "user", content: "需要查天气" },
+        {
+          role: "assistant",
+          content: [{ type: "thinking", thinking: "Need to call the weather tool." }],
+          tool_calls: [{
+            id: "call_1",
+            type: "function",
+            function: { name: "weather", arguments: "{}" },
+          }],
+        },
+        { role: "tool", tool_call_id: "call_1", content: "sunny" },
+        { role: "user", content: "继续" },
+      ],
+      reasoning_effort: "high",
+    };
+
+    const result = normalizeProviderPayload(payload, {
+      id: "glm-5.2",
+      provider: "zhipu-coding",
+      api: "openai-completions",
+      baseUrl: "https://api.z.ai/api/coding/paas/v4",
+      reasoning: true,
+      compat: { thinkingFormat: "zhipu", reasoningProfile: "zhipu-openai" },
+    }, { mode: "chat", reasoningLevel: "high" });
+
+    expect(result.thinking).toEqual({ type: "enabled", clear_thinking: false });
+    expect(result.messages[1]).toHaveProperty("reasoning_content", "Need to call the weather tool.");
+  });
 });
 
 describe("normalizeProviderPayload — DeepSeek Anthropic 模式", () => {
@@ -1039,6 +1131,96 @@ describe("normalizeProviderContextMessages — DeepSeek Anthropic replay", () =>
       mode: "chat",
       reasoningLevel: "off",
     })).toBe(messages);
+  });
+});
+
+describe("normalizeProviderContextMessages — MCP resource projection", () => {
+  it("projects toolResult resource.text blocks into model-visible text without mutating input", () => {
+    const textBlock = { type: "text", text: "plain tool output" };
+    const resourceBlock = {
+      type: "resource",
+      resource: {
+        uri: "file:///workspace/note.md",
+        name: "note.md",
+        mimeType: "text/markdown",
+        text: "# Notes\nUse this context.",
+      },
+    };
+    const messages = [
+      {
+        role: "toolResult",
+        toolCallId: "call_1",
+        toolName: "read_resource",
+        content: [textBlock, resourceBlock],
+      },
+    ];
+
+    const result = normalizeProviderContextMessages(messages, {
+      id: "gpt-5",
+      provider: "openai",
+      api: "openai-responses",
+    }, { mode: "chat" });
+
+    expect(result).not.toBe(messages);
+    expect(result[0]).not.toBe(messages[0]);
+    expect(result[0].content[0]).toBe(textBlock);
+    expect(result[0].content[1]).toEqual({
+      type: "text",
+      text: expect.stringContaining("# Notes\nUse this context."),
+    });
+    expect(result[0].content[1].text).toContain("uri: file:///workspace/note.md");
+    expect(result[0].content[1].text).toContain("name: note.md");
+    expect(result[0].content[1].text).toContain("mimeType: text/markdown");
+    expect(messages[0].content[1]).toBe(resourceBlock);
+  });
+
+  it("uses a text placeholder for resource.blob without injecting base64", () => {
+    const messages = [
+      {
+        role: "toolResult",
+        toolCallId: "call_1",
+        toolName: "read_resource",
+        content: [{
+          type: "resource",
+          resource: {
+            uri: "file:///workspace/pixel.png",
+            name: "pixel.png",
+            mimeType: "image/png",
+            blob: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAAB",
+          },
+        }],
+      },
+    ];
+
+    const result = normalizeProviderContextMessages(messages, null, { mode: "chat" });
+    const text = result[0].content[0].text;
+
+    expect(result).not.toBe(messages);
+    expect(text).toContain("uri: file:///workspace/pixel.png");
+    expect(text).toContain("name: pixel.png");
+    expect(text).toContain("mimeType: image/png");
+    expect(text).toContain("binary resource omitted");
+    expect(text).not.toContain("iVBORw0KGgo");
+    expect(messages[0].content[0].resource.blob).toContain("iVBORw0KGgo");
+  });
+
+  it("leaves non-toolResult resource blocks untouched", () => {
+    const messages = [
+      {
+        role: "user",
+        content: [{
+          type: "resource",
+          resource: {
+            uri: "file:///workspace/user.md",
+            name: "user.md",
+            mimeType: "text/markdown",
+            text: "do not project here",
+          },
+        }],
+      },
+    ];
+
+    expect(normalizeProviderContextMessages(messages, null, { mode: "chat" })).toBe(messages);
   });
 });
 

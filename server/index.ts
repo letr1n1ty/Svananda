@@ -22,12 +22,14 @@ import { ensureFirstRun } from "../core/first-run.ts";
 import { initDebugLog, createModuleLogger } from "../lib/debug-log.ts";
 import { redactLogLabel, redactLogText } from "../lib/log-redactor.ts";
 import { safeJson } from "./hono-helpers.ts";
+import { resolveSessionThinkingLevelState } from "./session-thinking-level-state.ts";
 
 const log = createModuleLogger("server");
 const checkpointLog = createModuleLogger("checkpoint");
 const sessionFilesLog = createModuleLogger("session-files");
 import { createOutboundProxyRuntime } from "../lib/net/outbound-proxy.ts";
 import { createServerAuthService } from "../core/server-auth.ts";
+import { createWebSocketTicketService } from "../core/ws-auth-ticket.ts";
 import { resolveServerListenOptions } from "../core/server-network-config.ts";
 import { isCorsOriginAllowed } from "./http/cors-policy.ts";
 import { inferHttpConnectionKind } from "./http/transport-context.ts";
@@ -48,6 +50,7 @@ import { createAvatarRoute } from "./routes/avatar.ts";
 import { createAgentsRoute } from "./routes/agents.ts";
 import { createDevicesRoute } from "./routes/devices.ts";
 import { createCharacterCardsRoute } from "./routes/character-cards.ts";
+import { createCardsRoute } from "./routes/cards.ts";
 import { createDeskRoute } from "./routes/desk.ts";
 import { createSkillsRoute } from "./routes/skills.ts";
 import { createChannelsRoute } from "./routes/channels.ts";
@@ -77,8 +80,10 @@ import { createCommandsRoute } from "./routes/commands.ts";
 import { createServerIdentityRoute } from "./routes/server-identity.ts";
 import { ensureLocalIdentityRegistries } from "../core/server-identity.ts";
 import { createResourcesRoute } from "./routes/resources.ts";
+import { createResourceIoRoute } from "./routes/resource-io.ts";
 import { createUsageRoute } from "./routes/usage.ts";
 import { createWebAuthRoute } from "./routes/web-auth.ts";
+import { createWebSocketAuthRoute } from "./routes/ws-auth.ts";
 import { createMobileWorkbenchRoute } from "./routes/mobile-workbench.ts";
 import { createStudioWorkspacesRoute } from "./routes/studio-workspaces.ts";
 import { createMobileStaticRoute } from "./routes/mobile-static.ts";
@@ -302,12 +307,11 @@ import { BrowserManager } from "../lib/browser/browser-manager.ts";
 BrowserManager.setHanakoHome(engine.hanakoHome);
 BrowserManager.setSessionIdResolver((sessionPath: string) => engine.getSessionIdForPath?.(sessionPath) || null);
 
-// 注：createSession 必须在所有 Pi SDK extension factory 都注册完之后
-// (framework extension via registerExtensionFactory + plugin extension via
-//  initPlugins)。否则 ExtensionRunner 在 session 构造时只绑定当时已有的
-// factories。运行期插件热操作后，engine.syncPluginExtensions() 会 reload
-// 已加载且空闲的 session，让 ExtensionRunner 重新绑定最新 factories。
-// 实际 createSession 调用下移到 initPlugins + registerExtensionFactory 之后。
+// 注：任何 createSession 都必须在相关 Pi SDK extension factory 注册完之后。
+// framework extension 在插件 onStartup 之前注册，避免启动插件通过 session:send
+// 抢先创建缺少核心 handler 的 session；plugin extension 由 initPlugins() 同步。
+// 运行期插件热操作后，engine.syncPluginExtensions() 会 reload 已加载且空闲的
+// session，让 ExtensionRunner 重新绑定最新 factories。
 
 // 写日志头部
 dlog.header(appVersion, {
@@ -322,6 +326,57 @@ if (process.platform === "win32") engine.startWin32LegacySandboxMaintenance();
 
 // ── 初始化 Hub（调度中枢，包装 engine） ──
 const hub = new Hub({ engine });
+
+// Framework Pi SDK extensions must be registered before plugin onStartup
+// lifecycles can create or resume sessions through session:send.
+const deferredResultStore = new DeferredResultStore(
+  hub.eventBus,
+  path.join(hanakoHome, ".ephemeral", "deferred-tasks.json"),
+  { getSessionIdForPath: (sessionPath: string) => engine.getSessionIdForPath?.(sessionPath) || null },
+);
+engine.setDeferredResultStore(deferredResultStore);
+registerDeferredResultBusHandlers(hub.eventBus, deferredResultStore);
+
+await engine.registerExtensionFactory(createDeferredResultExtension(deferredResultStore));
+await engine.registerExtensionFactory(createCompactionGuardExtension({
+  usageLedger: engine.usageLedger,
+  getCompactionMode: () => getResolvedCompactionMode(engine.preferences),
+  buildSessionCacheSnapshot: (sessionPath, options) => engine.buildSessionCacheSnapshot(sessionPath, options),
+  buildUsageContext: ({ ctx }) => {
+    const sessionPath = ctx?.sessionManager?.getSessionFile?.() || null;
+    const bridgeContext = sessionPath ? engine.getBridgeContextForSessionPath(sessionPath) : null;
+    if (bridgeContext?.isBridgeSession) {
+      const conversationType = bridgeContext.chatType === "channel" ? "channel" : "dm";
+      return {
+        source: {
+          subsystem: "compaction",
+          operation: "fresh_compact",
+          surface: conversationType,
+          trigger: "threshold",
+        },
+        attribution: {
+          kind: "phone_conversation",
+          agentId: bridgeContext.agentId || null,
+          conversationId: bridgeContext.sessionKey || bridgeContext.chatId || sessionPath,
+          conversationType,
+          ...sessionUsageFields(sessionPath),
+        },
+      };
+    }
+    return {
+      source: {
+        subsystem: "compaction",
+        operation: "compact",
+        surface: "desktop",
+        trigger: "threshold",
+      },
+      attribution: sessionUsageAttribution(
+        sessionPath,
+        sessionPath ? engine.agentIdFromSessionPath?.(sessionPath) || null : null,
+      ),
+    };
+  },
+}));
 
 // ── 初始化插件系统 ──
 await engine.initPlugins(hub.eventBus);
@@ -351,6 +406,7 @@ const serverAuthService = createServerAuthService({
   loopbackToken: SERVER_TOKEN,
   runtimeContext: () => engine.getRuntimeContext(),
 });
+const wsTicketService = createWebSocketTicketService();
 
 // ── 创建 Hono 实例 ──
 const app = new Hono();
@@ -429,6 +485,7 @@ app.use("*", async (c: any, next: any) => {
   // 链路实现与契约见 server/http/request-principal.ts（与测试共用）。
   const resolved = resolveHttpRequestPrincipal(c, engine, {
     serverAuthService,
+    wsTicketService,
     connectionKind: transport.connectionKind,
   });
   if (!resolved.ok) {
@@ -477,14 +534,6 @@ const confirmStore = new ConfirmStore({
 });
 engine.setConfirmStore(confirmStore);
 
-// --- Deferred Result Store ---
-const deferredResultStore = new DeferredResultStore(
-  hub.eventBus,
-  path.join(hanakoHome, ".ephemeral", "deferred-tasks.json"),
-  { getSessionIdForPath: (sessionPath: string) => engine.getSessionIdForPath?.(sessionPath) || null },
-);
-engine.setDeferredResultStore(deferredResultStore);
-
 const subagentRunStore = new SubagentRunStore(
   path.join(hanakoHome, "subagent-runs.json"),
   { getSessionIdForPath: (sessionPath: string) => engine.getSessionIdForPath?.(sessionPath) || null },
@@ -512,9 +561,6 @@ const activityHub = new ActivityHub(
   { getSessionIdForPath: (sessionPath: string) => engine.getSessionIdForPath?.(sessionPath) || null },
 );
 engine.setActivityHub(activityHub);
-
-// Bus handlers for plugin access
-registerDeferredResultBusHandlers(hub.eventBus, deferredResultStore);
 
 // Task registry bus handlers (plugin access)
 registerTaskRegistryBusHandlers(hub.eventBus, engine.taskRegistry);
@@ -624,49 +670,6 @@ hub.eventBus.handle("usage:list", (filter = {}) => {
   return engine.usageLedger.list(filter);
 });
 
-// Register Pi SDK extension factory
-await engine.registerExtensionFactory(createDeferredResultExtension(deferredResultStore));
-// Cache-preserving compaction — 接管 Pi auto/manual compact，避免原生 summarizer 冷读上下文
-await engine.registerExtensionFactory(createCompactionGuardExtension({
-  usageLedger: engine.usageLedger,
-  getCompactionMode: () => getResolvedCompactionMode(engine.preferences),
-  buildSessionCacheSnapshot: (sessionPath, options) => engine.buildSessionCacheSnapshot(sessionPath, options),
-  buildUsageContext: ({ ctx }) => {
-    const sessionPath = ctx?.sessionManager?.getSessionFile?.() || null;
-    const bridgeContext = sessionPath ? engine.getBridgeContextForSessionPath(sessionPath) : null;
-    if (bridgeContext?.isBridgeSession) {
-      const conversationType = bridgeContext.chatType === "channel" ? "channel" : "dm";
-      return {
-        source: {
-          subsystem: "compaction",
-          operation: "fresh_compact",
-          surface: conversationType,
-          trigger: "threshold",
-        },
-        attribution: {
-          kind: "phone_conversation",
-          agentId: bridgeContext.agentId || null,
-          conversationId: bridgeContext.sessionKey || bridgeContext.chatId || sessionPath,
-          conversationType,
-          ...sessionUsageFields(sessionPath),
-        },
-      };
-    }
-    return {
-      source: {
-        subsystem: "compaction",
-        operation: "compact",
-        surface: "desktop",
-        trigger: "threshold",
-      },
-      attribution: sessionUsageAttribution(
-        sessionPath,
-        sessionPath ? engine.agentIdFromSessionPath?.(sessionPath) || null : null,
-      ),
-    };
-  },
-}));
-
 // ── 启动默认 session ──
 // Desktop 会显式跳过：renderer 首屏就是 pending-new-session，首次发送消息时
 // 才需要创建 chat session；独立 server/CLI 保持旧行为。
@@ -759,6 +762,7 @@ app.route("", createMobileStaticRoute({ distDir: fromRoot("desktop", "dist-rende
 app.route("", createHtmlPreviewRoute());
 app.route("/api", chatRestRoute);
 app.route("", chatWsRoute);
+app.route("/api", createWebSocketAuthRoute({ ticketService: wsTicketService }));
 app.route("/api", createWebAuthRoute({
   hanakoHome: engine.hanakoHome,
   authService: serverAuthService,
@@ -779,6 +783,7 @@ app.route("/api", createAvatarRoute(engine));
 app.route("/api", createAgentsRoute(engine));
 app.route("/api", createDevicesRoute(engine));
 app.route("/api", createCharacterCardsRoute(engine));
+app.route("/api", createCardsRoute(engine));
 app.route("/api", createDeskRoute(engine, hub));
 app.route("/api", createMobileWorkbenchRoute(engine));
 app.route("/api", createStudioWorkspacesRoute(engine));
@@ -800,6 +805,7 @@ app.route("/api", createMediaRoute(engine));
 app.route("/api", createPluginsRoute(engine));
 app.route("/api", createCheckpointsRoute(engine));
 app.route("/api", createCommandsRoute(engine));
+app.route("/api", createResourceIoRoute(engine));
 app.route("/api", createResourcesRoute(engine));
 app.route("/api", createUsageRoute(engine));
 app.route("/api", createSpeechRecognitionRoute(engine));
@@ -879,9 +885,9 @@ app.get("/api/session-permission-mode", async (c) => {
 });
 
 app.get("/api/session-thinking-level", async (c) => {
-  return c.json({
-    thinkingLevel: engine.getSessionThinkingLevel?.() || engine.getDefaultThinkingLevel?.() || engine.getThinkingLevel?.() || "medium",
-  });
+  const sessionPath = c.req.query("sessionPath") || null;
+  const pendingNewSession = c.req.query("pendingNewSession") === "1";
+  return c.json(resolveSessionThinkingLevelState(engine, { sessionPath, pendingNewSession }));
 });
 
 app.post("/api/session-thinking-level", async (c) => {
@@ -893,16 +899,12 @@ app.post("/api/session-thinking-level", async (c) => {
     return c.json({
       ok: false,
       error: result.error || "failed to set thinking level",
-      thinkingLevel: result.thinkingLevel || (
-        sessionPath
-          ? engine.getSessionThinkingLevel(sessionPath)
-          : engine.getDefaultThinkingLevel?.()
-      ),
+      ...resolveSessionThinkingLevelState(engine, { sessionPath, pendingNewSession: !sessionPath }),
     }, 409);
   }
   return c.json({
     ok: true,
-    thinkingLevel: result.thinkingLevel,
+    ...resolveSessionThinkingLevelState(engine, { sessionPath, pendingNewSession: !sessionPath }),
   });
 });
 

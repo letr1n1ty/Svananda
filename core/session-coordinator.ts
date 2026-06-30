@@ -9,8 +9,9 @@ import fs from "fs";
 import fsp from "fs/promises";
 import path from "path";
 import { createAgentSession, SessionManager, estimateTokens, refreshSessionModelFromRegistry } from "../lib/pi-sdk/index.ts";
+import { isSessionJsonlFilename } from "../lib/session-jsonl.ts";
 import { createDefaultSettings } from "./session-defaults.ts";
-import { restoreDefaultWorkspaceIfMissing } from "../shared/default-workspace.ts";
+import { isDefaultWorkspacePath, restoreDefaultWorkspaceIfMissing } from "../shared/default-workspace.ts";
 import { computeHardTruncation } from "./compaction-utils.ts";
 import {
   appendCompactionResultToSession,
@@ -36,13 +37,14 @@ import {
   getStableFeatureDisabledToolNames,
   toolNamesFromObjects,
 } from "./tool-availability.ts";
-import { isActiveSessionPath } from "./message-utils.ts";
+import { isActiveSessionPath, isArchivedDesktopSessionPath } from "./message-utils.ts";
 import { formatWorkspaceScopePrompt, normalizeSessionFolderScope, normalizeWorkspaceScope } from "../shared/workspace-scope.ts";
 import { getProviderPromptPatches } from "./provider-prompt-patches.ts";
 import {
   DEEPSEEK_ROLEPLAY_REASONING_PATCH_EXPERIMENT_ID,
   getResolvedExperimentValue,
 } from "../lib/experiments/registry.ts";
+import { isDeepSeekModel } from "./provider-compat.ts";
 import {
   normalizePlainDescription,
   stripClosedInternalNarrationBlocks,
@@ -88,6 +90,7 @@ import {
 } from "../lib/llm/cache-prefix-contract.ts";
 import { buildSessionCacheSnapshot as buildSessionCacheSnapshotValue } from "./session-cache-snapshot.ts";
 import { repairRestoredToolSnapshotDetailed, sameToolNames } from "./tool-snapshot-repair.ts";
+import { buildSessionCapabilityDrift } from "./session-capability-drift.ts";
 import {
   SESSION_PROMPT_SNAPSHOT_VERSION,
   freezeAgentsFilesResult,
@@ -95,6 +98,7 @@ import {
   normalizeSessionPromptSnapshot,
   normalizeStringArray,
 } from "./session-prompt-snapshot.ts";
+import { buildTurnInputPresentationEvent } from "../lib/turn-input-presentation.ts";
 
 const log = createModuleLogger("session");
 const SESSION_META_PAYLOAD_DIR = "session-meta-payloads";
@@ -222,6 +226,15 @@ function activeToolDefinitionsFromSnapshot(allToolObjects: any, snapshotToolName
 
 function normalizeDeletedAgentTranscriptMessage(message: any) {
   if (!message || typeof message !== "object") return null;
+  if (message.role === "compactionSummary") {
+    const text = textOrNull(message.summary) || extractPlainTextFromContent(message.content).trim();
+    if (!text) return null;
+    return {
+      role: "assistant",
+      content: [{ type: "text", text: `[历史压缩摘要]\n${text}` }],
+      timestamp: timestampFromHistoryMessage(message),
+    };
+  }
   if (message.role !== "user" && message.role !== "assistant") return null;
   const text = extractPlainTextFromContent(message.content, { stripThink: message.role === "assistant" }).trim();
   if (!text) return null;
@@ -235,16 +248,35 @@ function normalizeDeletedAgentTranscriptMessage(message: any) {
 function readSessionBranchMessages(sessionPath: any) {
   const manager = SessionManager.open(sessionPath, path.dirname(sessionPath));
   const branch = manager.getBranch();
-  return branch
-    .filter(entry => entry?.type === "message" && (entry as any).message)
-    .map(entry => ({
-      ...(entry as any).message,
-      timestamp: (entry as any).message.timestamp ?? entry.timestamp ?? null,
-    }));
+  const messages: any[] = [];
+  for (const entry of branch) {
+    if (entry?.type === "message" && (entry as any).message) {
+      messages.push({
+        ...(entry as any).message,
+        timestamp: (entry as any).message.timestamp ?? entry.timestamp ?? null,
+      });
+      continue;
+    }
+    if (entry?.type === "compaction" && textOrNull((entry as any).summary)) {
+      messages.push({
+        role: "compactionSummary",
+        summary: (entry as any).summary,
+        timestamp: (entry as any).timestamp ?? null,
+      });
+    }
+  }
+  return messages;
 }
 
 function textOrNull(value: any) {
   return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function deletedAgentContinuationError(code: string, message: string, status = 422) {
+  const err = new Error(`continueDeletedAgentSession: ${message}`);
+  (err as any).code = code;
+  (err as any).status = status;
+  return err;
 }
 
 function modelIdFromModel(model: any) {
@@ -314,6 +346,65 @@ function recordAssistantUsage({ ledger, event, sessionPath, sessionId, agentId, 
       costRates,
     });
     return ledger.recordError(request.requestId, new Error(errorMessage || "provider request failed"));
+  }
+  return null;
+}
+
+function logDeepSeekReasoningVisibility({ event, model, sessionPath, agentId }: any) {
+  if (!isDeepSeekModel(model)) return;
+  const provider = textOrNull(model?.provider) || "deepseek";
+  const modelId = modelIdFromModel(model) || "unknown";
+  const sessionName = sessionPath ? path.basename(sessionPath) : "unknown";
+  if (event?.type === "message_update") {
+    const sub = event.assistantMessageEvent || event.event || null;
+    if (sub?.type !== "thinking_delta") return;
+    const chars = String(sub.delta ?? sub.text ?? sub.thinking ?? "").length;
+    log.log(`[deepseek reasoning] event=thinking_delta provider=${provider} model=${modelId} agent=${agentId || ""} session=${sessionName} chars=${chars}`);
+    return;
+  }
+  if (event?.type !== "message_end" || event.message?.role !== "assistant") return;
+  const stats = collectThinkingVisibilityStats(event.message);
+  const usage = event.message?.usage || {};
+  const reasoningTokens = firstFiniteNumber(
+    usage.reasoningTokens,
+    usage.reasoning_tokens,
+    usage.output?.reasoningTokens,
+    usage.completion_tokens_details?.reasoning_tokens,
+  );
+  log.log(`[deepseek reasoning] event=message_end provider=${provider} model=${modelId} agent=${agentId || ""} session=${sessionName} thinkingBlocks=${stats.blocks} thinkingChars=${stats.chars} reasoningTokens=${reasoningTokens ?? ""} stopReason=${event.message?.stopReason || ""}`);
+}
+
+function collectThinkingVisibilityStats(message: any) {
+  const blocks = [];
+  const visit = (value) => {
+    if (!value) return;
+    if (Array.isArray(value)) {
+      for (const item of value) visit(item);
+      return;
+    }
+    if (typeof value !== "object") return;
+    const type = typeof value.type === "string" ? value.type : "";
+    if (type === "thinking" || type === "reasoning" || type === "reasoning_text") {
+      blocks.push(value);
+    }
+    for (const key of ["content", "thinking", "reasoning", "reasoningText", "text"]) {
+      if (key === "text" && type !== "thinking" && type !== "reasoning" && type !== "reasoning_text") continue;
+      const child = value[key];
+      if (child && typeof child === "object") visit(child);
+    }
+  };
+  visit(message?.content);
+  const chars = blocks.reduce((total, block) => (
+    total
+      + String(block.thinking ?? block.reasoning ?? block.reasoningText ?? block.text ?? block.content ?? "").length
+  ), 0);
+  return { blocks: blocks.length, chars };
+}
+
+function firstFiniteNumber(...values) {
+  for (const value of values) {
+    const n = Number(value);
+    if (Number.isFinite(n)) return n;
   }
   return null;
 }
@@ -756,6 +847,191 @@ export class SessionCoordinator {
     }
   }
 
+  _makeSessionLocatorStateError(operation: string, sessionPath: any, manifest: any) {
+    const lifecycle = manifest?.lifecycle || "unknown";
+    const currentPath = manifest?.currentLocator?.path || null;
+    const error: any = new Error(
+      `${operation}: session path is not runnable because its current lifecycle is ${lifecycle}`
+      + (currentPath ? ` at ${currentPath}` : "")
+      + `; requested ${sessionPath}`,
+    );
+    error.code = "session_locator_not_active";
+    error.status = 409;
+    error.sessionId = manifest?.sessionId || null;
+    error.currentPath = currentPath;
+    error.lifecycle = lifecycle;
+    return error;
+  }
+
+  _assertCurrentActiveSessionLocator(sessionPath: any, operation: string) {
+    if (!sessionPath) return null;
+    const manifest = this._resolveSessionManifestForPath(sessionPath);
+    if (!manifest) return null;
+    const currentPath = manifest.currentLocator?.path;
+    const requestedPath = path.resolve(sessionPath);
+    if (manifest.lifecycle && manifest.lifecycle !== "active") {
+      throw this._makeSessionLocatorStateError(operation, sessionPath, manifest);
+    }
+    if (currentPath && path.resolve(currentPath) !== requestedPath) {
+      throw this._makeSessionLocatorStateError(operation, sessionPath, manifest);
+    }
+    return manifest;
+  }
+
+  _isCurrentActiveSessionLocator(sessionPath: any) {
+    try {
+      const manifest = this._resolveSessionManifestForPath(sessionPath);
+      if (!manifest) return true;
+      if (manifest.lifecycle && manifest.lifecycle !== "active") return false;
+      const currentPath = manifest.currentLocator?.path;
+      return !currentPath || path.resolve(currentPath) === path.resolve(sessionPath);
+    } catch {
+      return false;
+    }
+  }
+
+  async moveSessionLifecycle({ fromPath = null, toPath = null, lifecycle = null, reason = "session_lifecycle", manifestDefaults = {} }: any = {}) {
+    if (!this._sessionManifestStore || typeof this._sessionManifestStore.updateLocatorLifecycle !== "function") {
+      const error: any = new Error("Session manifest lifecycle transition is unavailable.");
+      error.code = "session_manifest_unavailable";
+      error.status = 503;
+      throw error;
+    }
+    if (!toPath) {
+      const error: any = new Error("moveSessionLifecycle: toPath is required");
+      error.code = "session_lifecycle_path_required";
+      error.status = 400;
+      throw error;
+    }
+    if (lifecycle !== "active" && lifecycle !== "archived") {
+      const error: any = new Error(`moveSessionLifecycle: unsupported lifecycle ${lifecycle || "(empty)"}`);
+      error.code = "session_lifecycle_invalid";
+      error.status = 400;
+      throw error;
+    }
+
+    let manifest = null;
+    for (const candidate of [fromPath, toPath]) {
+      if (!candidate) continue;
+      manifest = this._resolveSessionManifestForPath(candidate);
+      if (manifest) break;
+    }
+    if (!manifest) {
+      const seedPath = fromPath || toPath;
+      const initialLifecycle = isArchivedDesktopSessionPath(seedPath, this._d.agentsDir) ? "archived" : "active";
+      manifest = this._ensureSessionManifestForPath(seedPath, {
+        ownerAgentId: this._d.agentIdFromSessionPath?.(seedPath) || null,
+        domain: "desktop",
+        kind: "chat",
+        lifecycle: initialLifecycle,
+        provenance: { createdBy: "session_lifecycle_transition" },
+        locatorReason: reason,
+        ...(manifestDefaults || {}),
+      });
+    }
+    if (!manifest?.sessionId) {
+      const error: any = new Error("moveSessionLifecycle: session manifest could not be established");
+      error.code = "session_manifest_not_found";
+      error.status = 404;
+      throw error;
+    }
+
+    const updated = this._sessionManifestStore.updateLocatorLifecycle(
+      manifest.sessionId,
+      toPath,
+      lifecycle,
+      reason,
+    );
+    if (!updated?.currentLocator?.path || path.resolve(updated.currentLocator.path) !== path.resolve(toPath) || updated.lifecycle !== lifecycle) {
+      const error: any = new Error("moveSessionLifecycle: manifest transition verification failed");
+      error.code = "session_lifecycle_transition_failed";
+      error.status = 500;
+      error.sessionId = manifest.sessionId;
+      error.toPath = toPath;
+      error.lifecycle = lifecycle;
+      throw error;
+    }
+    return updated;
+  }
+
+  _readSessionCapabilitySnapshot(sessionPath: any) {
+    if (!this._sessionManifestStore || !sessionPath) return null;
+    try {
+      const manifest = this._resolveSessionManifestForPath(sessionPath);
+      if (!manifest?.sessionId || typeof this._sessionManifestStore.getCapabilitySnapshot !== "function") return null;
+      return this._sessionManifestStore.getCapabilitySnapshot(manifest.sessionId);
+    } catch (err) {
+      log.warn(`session capability snapshot read failed for ${path.basename(sessionPath || "")}: ${err?.message || err}`);
+      return null;
+    }
+  }
+
+  _writeSessionCapabilitySnapshot(sessionPath: any, partial: any, source = "session_meta_write") {
+    if (!this._sessionManifestStore || !sessionPath || !partial || typeof partial !== "object") return;
+    if (typeof this._sessionManifestStore.setCapabilitySnapshot !== "function") return;
+    const snapshot: any = {};
+    if (Object.prototype.hasOwnProperty.call(partial, "toolNames")) {
+      snapshot.toolNames = partial.toolNames;
+    }
+    if (Object.prototype.hasOwnProperty.call(partial, "promptSnapshot")) {
+      snapshot.promptSnapshot = partial.promptSnapshot;
+    }
+    if (Object.prototype.hasOwnProperty.call(partial, "capabilityDriftDismissedFingerprint")) {
+      snapshot.capabilityDriftDismissedFingerprint = partial.capabilityDriftDismissedFingerprint;
+    }
+    if (Object.keys(snapshot).length === 0) return;
+    try {
+      const manifest = this._resolveSessionManifestForPath(sessionPath);
+      if (!manifest?.sessionId) return;
+      this._sessionManifestStore.setCapabilitySnapshot(manifest.sessionId, snapshot, { source });
+    } catch (err) {
+      log.warn(`session capability snapshot write failed for ${path.basename(sessionPath || "")}: ${err?.message || err}`);
+    }
+  }
+
+  getSessionExecutorMetadata(ref: any) {
+    if (!this._sessionManifestStore || typeof this._sessionManifestStore.getExecutorMetadata !== "function") return null;
+    try {
+      const normalized = this._normalizeSessionRef(ref);
+      const sessionId = normalized.sessionId
+        || (normalized.sessionPath ? this._resolveSessionManifestForPath(normalized.sessionPath)?.sessionId : null);
+      return sessionId ? this._sessionManifestStore.getExecutorMetadata(sessionId) : null;
+    } catch (err) {
+      log.warn(`session executor metadata read failed: ${err?.message || err}`);
+      return null;
+    }
+  }
+
+  setSessionExecutorMetadata(ref: any, metadata: any, options: any = {}) {
+    if (!this._sessionManifestStore || typeof this._sessionManifestStore.setExecutorMetadata !== "function") return null;
+    const normalized = this._normalizeSessionRef(ref);
+    let manifest = null;
+    if (normalized.sessionId) {
+      manifest = this._resolveSessionManifestForId(normalized.sessionId);
+    } else if (normalized.sessionPath) {
+      manifest = this._resolveSessionManifestForPath(normalized.sessionPath)
+        || this._ensureSessionManifestForPath(normalized.sessionPath, {
+          ownerAgentId: this._d.agentIdFromSessionPath?.(normalized.sessionPath) || null,
+          domain: "desktop",
+          kind: options.kind || "chat",
+          provenance: { createdBy: options.provenance || "session_executor_metadata" },
+          locatorReason: options.locatorReason || "session_executor_metadata",
+          ...(options.manifestDefaults || {}),
+        });
+    }
+    if (!manifest?.sessionId) return null;
+    try {
+      return this._sessionManifestStore.setExecutorMetadata(
+        manifest.sessionId,
+        metadata,
+        { source: options.source || "subagent_runtime" },
+      );
+    } catch (err) {
+      log.warn(`session executor metadata write failed: ${err?.message || err}`);
+      return null;
+    }
+  }
+
   _sessionTitleKeyForPath(sessionPath: any) {
     return this._sessionIdForPath(sessionPath) || sessionPath;
   }
@@ -763,10 +1039,10 @@ export class SessionCoordinator {
   _sessionTitleFromMap(titles: any, sessionPath: any, extraLegacyPaths: any[] = []) {
     if (!titles || !sessionPath) return null;
     const keys: string[] = [];
-    const sessionId = this._sessionIdForPath(sessionPath);
-    if (sessionId) keys.push(sessionId);
     for (const candidate of [sessionPath, ...extraLegacyPaths]) {
       if (!candidate) continue;
+      const sessionId = this._sessionIdForPath(candidate);
+      if (sessionId) keys.push(sessionId);
       keys.push(candidate);
       keys.push(path.basename(candidate));
     }
@@ -795,7 +1071,7 @@ export class SessionCoordinator {
   _sessionPathForEntry(entry: any, fallbackKey: any = null) {
     return entry?.sessionPath
       || entry?.session?.sessionManager?.getSessionFile?.()
-      || (typeof fallbackKey === "string" && fallbackKey.endsWith(".jsonl") ? fallbackKey : null);
+      || (typeof fallbackKey === "string" && isSessionJsonlFilename(path.basename(fallbackKey)) ? fallbackKey : null);
   }
 
   _getSessionEntryByPath(sessionPath: any) {
@@ -867,11 +1143,13 @@ export class SessionCoordinator {
         continue;
       }
       if (session.isStreaming || session.isCompacting || entry._switching) {
+        this._markExtensionRunnerDirty(entry, reason);
         summary.skipped += 1;
         continue;
       }
       try {
         await session.reload();
+        this._clearExtensionRunnerDirty(entry);
         entry.lastTouchedAt = Date.now();
         summary.reloaded += 1;
       } catch (err) {
@@ -880,6 +1158,37 @@ export class SessionCoordinator {
       }
     }
     return summary;
+  }
+
+  _markExtensionRunnerDirty(entry: any, reason = "extension_factories_changed") {
+    if (!entry) return;
+    entry.extensionRunnerDirty = true;
+    entry.extensionRunnerDirtyReason = reason;
+    entry.extensionRunnerDirtyAt = Date.now();
+  }
+
+  _clearExtensionRunnerDirty(entry: any) {
+    if (!entry) return;
+    entry.extensionRunnerDirty = false;
+    entry.extensionRunnerDirtyReason = null;
+    entry.extensionRunnerDirtyAt = null;
+  }
+
+  async _reloadDirtyExtensionRunnerIfPossible(entry: any, sessionPath: any, reason = "session_operation") {
+    if (!entry?.extensionRunnerDirty) return false;
+    const session = entry.session;
+    if (!session || typeof session.reload !== "function") return false;
+    if (session.isStreaming || session.isCompacting || entry._switching) return false;
+    try {
+      await session.reload();
+      this._clearExtensionRunnerDirty(entry);
+      entry.lastTouchedAt = Date.now();
+      log.log(`dirty extension runner reloaded for ${path.basename(sessionPath)} (${reason})`);
+      return true;
+    } catch (err) {
+      log.warn(`dirty extension runner reload failed for ${path.basename(sessionPath)} (${reason}): ${err?.message || err}`);
+      return false;
+    }
   }
 
   // ── Session 创建 / 切换 ──
@@ -910,8 +1219,11 @@ export class SessionCoordinator {
       throw new Error("createSession: target agent unavailable");
     }
     const ownerAgentId = explicitAgentId || agent.id || this._d.getActiveAgentId();
-    const effectiveCwd = cwd || this._d.getHomeCwd(agent.id) || process.cwd();
-    restoreDefaultWorkspaceIfMissing(effectiveCwd);
+    const configuredHomeCwd = this._d.getHomeCwd(agent.id);
+    const effectiveCwd = cwd || configuredHomeCwd || process.cwd();
+    if (!restore && !cwd && isDefaultWorkspacePath(configuredHomeCwd) && isDefaultWorkspacePath(effectiveCwd)) {
+      restoreDefaultWorkspaceIfMissing(effectiveCwd);
+    }
     const models = this._d.getModels();
     // restore 模式：不指定 model，让 PI SDK 从 JSONL 恢复（session model 单一数据源）
     const effectiveModel = restore ? null : (model || this._pendingModel || models.currentModel);
@@ -927,6 +1239,9 @@ export class SessionCoordinator {
       sessionMgr = SessionManager.create(effectiveCwd, agent.sessionDir);
     }
     const sessionPathForMeta = sessionMgr.getSessionFile?.() || null;
+    let restoredCapabilitySnapshot = restore && sessionPathForMeta
+      ? this._readSessionCapabilitySnapshot(sessionPathForMeta)
+      : null;
     let restoredThinkingLevel = null;
     if (restore && sessionPathForMeta) {
       try {
@@ -945,7 +1260,10 @@ export class SessionCoordinator {
     // #1624 refreshCapabilitySnapshots：跳过冻结 promptSnapshot，下游 fresh-build
     // 路径会按当前配置重建并在 metaPatch 持久化（与 !restoredPromptSnapshot 同一条路）。
     const restoredPromptSnapshot = restore && sessionPathForMeta && !refreshCapabilitySnapshots
-      ? await this._readSessionPromptSnapshot(agent, sessionPathForMeta)
+      ? (
+        normalizeSessionPromptSnapshot(restoredCapabilitySnapshot?.promptSnapshot)
+        || await this._readSessionPromptSnapshot(agent, sessionPathForMeta)
+      )
       : null;
     const restoredPromptModel = restore && !restoredPromptSnapshot
       ? this._resolvePromptModelFromSessionManager(sessionMgr, models)
@@ -1038,11 +1356,17 @@ export class SessionCoordinator {
     const baseResourceLoader = this._d.getResourceLoader();
     let restoredPermissionMode = null;
     if (restore && sessionPathForMeta) {
+      const manifest = this._resolveSessionManifestForPath(sessionPathForMeta);
+      if (manifest?.permissionModeSnapshot?.mode) {
+        restoredPermissionMode = normalizeSessionPermissionMode(manifest.permissionModeSnapshot.mode);
+      }
+    }
+    if (restore && sessionPathForMeta && restoredPermissionMode === null) {
       try {
         const metaPath = path.join(agent.sessionDir, "session-meta.json");
         const meta = await this._readMetaCached(metaPath);
         const metaEntry = meta[path.basename(sessionPathForMeta)];
-        if (metaEntry) {
+        if (hasSessionPermissionModeFields(metaEntry)) {
           restoredPermissionMode = normalizeSessionPermissionMode(metaEntry);
         }
       } catch (err) {
@@ -1209,7 +1533,7 @@ export class SessionCoordinator {
       log.warn(`session model fallback: ${modelFallbackMessage}`);
     }
     const resolvedModel = session.model;
-    const actualThinkingLevel = normalizeThinkingLevelForModel(initialThinkingLevel, resolvedModel);
+    const actualThinkingLevel = normalizeThinkingLevelForModel(requestedThinkingLevel, resolvedModel);
     if (actualThinkingLevel !== initialThinkingLevel) {
       initialThinkingLevel = actualThinkingLevel;
       resolvedThinkingLevel = models.resolveThinkingLevel(initialThinkingLevel);
@@ -1226,12 +1550,27 @@ export class SessionCoordinator {
     this._session = session;
     this._currentSessionPath = sessionPath || null;
     this._sessionStarted = false;
+    if (restore && sessionPath && !restoredCapabilitySnapshot) {
+      restoredCapabilitySnapshot = this._readSessionCapabilitySnapshot(sessionPath);
+    }
+    if (restore && sessionPath && restoredPermissionMode === null) {
+      const manifest = this._resolveSessionManifestForPath(sessionPath);
+      if (manifest?.permissionModeSnapshot?.mode) {
+        restoredPermissionMode = normalizeSessionPermissionMode(manifest.permissionModeSnapshot.mode);
+        initialPermissionMode = restoredPermissionMode;
+        initialAccessMode = legacyAccessModeFromPermissionMode(initialPermissionMode);
+        initialPlanMode = isReadOnlyPermissionMode(initialPermissionMode);
+        sessionEntry.permissionMode = initialPermissionMode;
+        sessionEntry.accessMode = initialAccessMode;
+        sessionEntry.planMode = initialPlanMode;
+      }
+    }
     if (restore && sessionPath && restoredPermissionMode === null) {
       try {
         const metaPath = path.join(agent.sessionDir, "session-meta.json");
         const meta = await this._readMetaCached(metaPath);
         const metaEntry = meta[path.basename(sessionPath)];
-        if (metaEntry) {
+        if (hasSessionPermissionModeFields(metaEntry)) {
           initialPermissionMode = normalizeSessionPermissionMode(metaEntry);
           initialAccessMode = legacyAccessModeFromPermissionMode(initialPermissionMode);
           initialPlanMode = isReadOnlyPermissionMode(initialPermissionMode);
@@ -1267,6 +1606,12 @@ export class SessionCoordinator {
           surface: "desktop",
           trigger: "user",
         },
+      });
+      logDeepSeekReasoningVisibility({
+        event,
+        model: resolvedModel,
+        sessionPath,
+        agentId: creatingAgentId,
       });
       this._d.emitEvent(
         (event as any).agentId ? event : { ...event, agentId: creatingAgentId },
@@ -1311,6 +1656,9 @@ export class SessionCoordinator {
     let shouldPersistRestoredToolNames = false;
     // #1624：dismissed fingerprint 仍从 session-meta 读出，保留未来手动提示链路。
     let restoredDriftDismissedFingerprint: string | null = null;
+    const restoredCapabilityToolNames = Array.isArray(restoredCapabilitySnapshot?.toolNames)
+      ? uniqueToolNames(restoredCapabilitySnapshot.toolNames)
+      : null;
 
     if (restore) {
       if (sessionPath) {
@@ -1325,7 +1673,9 @@ export class SessionCoordinator {
           }
         }
         restoredDriftDismissedFingerprint =
-          typeof metaEntry?.capabilityDriftDismissedFingerprint === "string"
+          typeof restoredCapabilitySnapshot?.capabilityDriftDismissedFingerprint === "string"
+            ? restoredCapabilitySnapshot.capabilityDriftDismissedFingerprint
+            : typeof metaEntry?.capabilityDriftDismissedFingerprint === "string"
             ? metaEntry.capabilityDriftDismissedFingerprint
             : null;
         if (refreshCapabilitySnapshots) {
@@ -1337,6 +1687,13 @@ export class SessionCoordinator {
           });
           shouldPersistRestoredToolNames = true;
           restoredDriftDismissedFingerprint = null;
+        } else if (restoredCapabilityToolNames) {
+          const gatedRestoredToolNames = computeToolSnapshot(restoredCapabilityToolNames, [], {
+            extraDisabled: stableFeatureDisabledToolNames,
+          });
+          const repair = repairRestoredToolSnapshotDetailed(gatedRestoredToolNames, allToolNames);
+          snapshotToolNames = repair.toolNames;
+          shouldPersistRestoredToolNames = !sameToolNames(snapshotToolNames, restoredCapabilityToolNames);
         } else if (metaEntry && Array.isArray(metaEntry.toolNames)) {
           const restoredToolNames = uniqueToolNames(metaEntry.toolNames);
           const gatedRestoredToolNames = computeToolSnapshot(restoredToolNames, [], {
@@ -1495,6 +1852,9 @@ export class SessionCoordinator {
     } else if (restore && sessionPath) {
       const metaPatch: any = {};
       if (!restoredPromptSnapshot) metaPatch.promptSnapshot = promptSnapshotToWrite;
+      if (restoredThinkingLevel !== initialThinkingLevel) {
+        metaPatch.thinkingLevel = initialThinkingLevel;
+      }
       if (shouldPersistRestoredToolNames && snapshotToolNames !== null) {
         metaPatch.toolNames = snapshotToolNames;
       }
@@ -1626,7 +1986,11 @@ export class SessionCoordinator {
       .map(normalizeDeletedAgentTranscriptMessage)
       .filter(Boolean);
     if (transcriptMessages.length === 0) {
-      throw new Error("continueDeletedAgentSession: source session has no displayable transcript");
+      throw deletedAgentContinuationError(
+        "SESSION_TRANSCRIPT_EMPTY",
+        "source session has no displayable transcript",
+        422,
+      );
     }
 
     let createdSessionPath = null;
@@ -1958,6 +2322,19 @@ export class SessionCoordinator {
     return typeof metaEntry?.memoryEnabled === "boolean" ? metaEntry.memoryEnabled : null;
   }
 
+  getSessionMemoryReflectionSnapshot(sessionPath = this.currentSessionPath) {
+    if (!sessionPath) return null;
+    const entry = this._sessionFolderEntry(sessionPath);
+    const liveSnapshot = entry?.memoryReflectionSnapshot;
+    if (liveSnapshot && typeof liveSnapshot === "object" && !Array.isArray(liveSnapshot)) {
+      return liveSnapshot;
+    }
+    const metaSnapshot = this._readSessionMetaEntrySync(sessionPath)?.memoryReflectionSnapshot;
+    return metaSnapshot && typeof metaSnapshot === "object" && !Array.isArray(metaSnapshot)
+      ? metaSnapshot
+      : null;
+  }
+
   getSessionMemoryEnabled(sessionPath = this.currentSessionPath) {
     if (!sessionPath) return true;
     const liveEntry = this._getSessionEntryByPath(sessionPath);
@@ -2021,6 +2398,7 @@ export class SessionCoordinator {
     if (this._isDeletedAgentSessionPath(sessionPath)) {
       throw new Error("switchSession: session belongs to a deleted agent");
     }
+    this._assertCurrentActiveSessionLocator(sessionPath, "switchSession");
 
     // 切到已有 session 时清空 pendingModel（用户的临时选择不应跟到别的 session）
     this._pendingModel = null;
@@ -2272,6 +2650,7 @@ export class SessionCoordinator {
     if (sessionPath === this.currentSessionPath && this._session !== entry.session) {
       this._session = entry.session;
     }
+    await this._reloadDirtyExtensionRunnerIfPossible(entry, sessionPath, "prompt_session");
     entry.lastTouchedAt = Date.now();
     if (entry.sessionVisibility !== "plugin_private" && entry.sessionVisibility !== "private") {
       entry.visibleInSessionList = true;
@@ -2327,6 +2706,12 @@ export class SessionCoordinator {
     return true;
   }
 
+  _emitTurnInputPresentation(sessionPath: any, message: any, deliveryMode: any) {
+    const event = buildTurnInputPresentationEvent(message, { deliveryMode });
+    if (!event) return;
+    this._d.emitEvent?.(event, sessionPath);
+  }
+
   async deliverCustomMessage(sessionPath: any, message: any, options: any = {}) {
     if (!sessionPath) throw new Error("deliverCustomMessage: sessionPath is required");
     this._assertActiveDesktopSessionPath(sessionPath, "deliverCustomMessage");
@@ -2345,10 +2730,14 @@ export class SessionCoordinator {
     entry.lastTouchedAt = Date.now();
     if (entry.session.isStreaming) {
       await entry.session.sendCustomMessage(message, { deliverAs: "followUp" });
+      this._emitTurnInputPresentation(sessionPath, message, "followUp");
       return { ok: true, mode: "followUp" };
     }
 
     const triggerTurn = options?.triggerTurn !== false;
+    if (triggerTurn) {
+      this._emitTurnInputPresentation(sessionPath, message, "triggerTurn");
+    }
     await entry.session.sendCustomMessage(message, { triggerTurn });
     return { ok: true, mode: triggerTurn ? "triggerTurn" : "notifyOnly" };
   }
@@ -3235,6 +3624,7 @@ export class SessionCoordinator {
   isRunnableSessionPath(sessionPath: any) {
     if (!isActiveSessionPath(sessionPath, this._d.agentsDir)) return false;
     if (this._isDeletedAgentSessionPath(sessionPath)) return false;
+    if (!this._isCurrentActiveSessionLocator(sessionPath)) return false;
     if (
       this._getSessionEntryByPath(sessionPath)
       || this._getRuntimeValueForPath(this._hibernatedSessionMeta, sessionPath)
@@ -3264,6 +3654,96 @@ export class SessionCoordinator {
     };
   }
 
+  _computeLiveToolSnapshotForEntry(entry: any, sessionPath: any) {
+    const agent = this._d.getAgentById?.(entry?.agentId) || this._d.getAgent?.();
+    if (!agent) return null;
+    const cwd = entry?.cwd || entry?.session?.sessionManager?.getCwd?.() || this._d.getHomeCwd?.(agent.id) || process.cwd();
+    const models = this._d.getModels?.() || {};
+    const model = entry?.session?.model
+      || (entry?.modelId && entry?.modelProvider && Array.isArray(models.availableModels)
+        ? findModel(models.availableModels, entry.modelId, entry.modelProvider)
+        : null)
+      || models.currentModel
+      || null;
+    const toolSnapshotOptions: any = {
+      forceMemoryEnabled: entry?.memoryEnabled !== false,
+      model,
+    };
+    if (typeof agent.experienceEnabled === "boolean") {
+      toolSnapshotOptions.forceExperienceEnabled = entry?.experienceEnabled === true;
+    }
+    const agentToolsSnapshot = typeof agent.getToolsSnapshot === "function"
+      ? agent.getToolsSnapshot(toolSnapshotOptions)
+      : agent.tools;
+    const workspaceScope = normalizeWorkspaceScope({
+      primaryCwd: cwd,
+      workspaceFolders: Array.isArray(entry?.workspaceFolders) ? entry.workspaceFolders : [],
+    });
+    const folderScope = normalizeSessionFolderScope({
+      primaryCwd: cwd,
+      workspaceFolders: workspaceScope.workspaceFolders,
+      authorizedFolders: Array.isArray(entry?.authorizedFolders) ? entry.authorizedFolders : [],
+    });
+    const built = this._d.buildTools?.(cwd, agentToolsSnapshot, {
+      workspace: cwd,
+      workspaceFolders: workspaceScope.workspaceFolders,
+      authorizedFolders: folderScope.authorizedFolders,
+      getAuthorizedFolders: () => this.getSessionAuthorizedFolders(sessionPath),
+      agentDir: agent.agentDir,
+    }) || { tools: [], customTools: [] };
+    const allToolObjects = [
+      ...(built.tools || []),
+      ...(built.customTools || []),
+    ];
+    const allToolNames = toolNamesFromObjects(allToolObjects);
+    const channelsEnabled = this._d.getPrefs?.()?.getChannelsEnabled?.();
+    const extraDisabledToolNames = [
+      ...getStableFeatureDisabledToolNames({ channelsEnabled }),
+      ...computeRuntimeDisabledToolNames(
+        allToolObjects,
+        agent.config,
+        { agentId: entry?.agentId, restore: false, channelsEnabled },
+        { warn: (msg) => log.warn(msg) },
+      ),
+    ];
+    const disabled = agent.config?.tools?.disabled ?? DEFAULT_DISABLED_TOOL_NAMES;
+    return computeToolSnapshot(allToolNames, disabled, {
+      extraDisabled: extraDisabledToolNames,
+    });
+  }
+
+  markCapabilitySnapshotsStale({ agentId = null, reason = "capability_changed" }: any = {}) {
+    const targetAgentId = typeof agentId === "string" && agentId ? agentId : null;
+    let scanned = 0;
+    let marked = 0;
+    for (const entry of this._sessions.values()) {
+      if (!entry?.sessionPath || !entry?.session) continue;
+      if (targetAgentId && entry.agentId !== targetAgentId) continue;
+      scanned += 1;
+      const frozenToolNames = Array.isArray(entry.toolNames)
+        ? entry.toolNames
+        : (entry.activeToolDefinitions || []).map((tool) => tool?.name).filter(Boolean);
+      const liveToolNames = this._computeLiveToolSnapshotForEntry(entry, entry.sessionPath);
+      if (!liveToolNames) continue;
+      const drift = buildSessionCapabilityDrift({
+        frozenToolNames,
+        liveToolNames,
+        frozenSystemPrompt: "",
+        liveSystemPrompt: "",
+      });
+      entry.capabilityDrift = drift.hasDrift ? { ...drift, reason } : null;
+      if (drift.hasDrift) {
+        marked += 1;
+        this._emitSessionMetadataUpdated(entry.sessionPath, {
+          capabilityDrift: this.getSessionCapabilityDriftNotice(entry.sessionPath),
+        });
+      } else {
+        this._emitSessionMetadataUpdated(entry.sessionPath, { capabilityDrift: null });
+      }
+    }
+    return { ok: true, scanned, marked };
+  }
+
   /**
    * #1624：记录"用户关闭了当前 fingerprint 的提示"。持久化在 session-meta
    * （跟 session 走，跨重启生效）；指纹再次变化时才重新提示。
@@ -3284,6 +3764,7 @@ export class SessionCoordinator {
     if (this._isDeletedAgentSessionPath(sessionPath)) {
       throw new Error("reloadSessionRuntime: session belongs to a deleted agent");
     }
+    this._assertCurrentActiveSessionLocator(sessionPath, "reloadSessionRuntime");
     const targetAgentId = this._d.agentIdFromSessionPath(sessionPath);
     if (!targetAgentId) {
       throw new Error(`reloadSessionRuntime: cannot resolve agentId for ${sessionPath}`);
@@ -3341,6 +3822,7 @@ export class SessionCoordinator {
     if (this._isDeletedAgentSessionPath(sessionPath)) {
       throw new Error("ensureSessionLoaded: session belongs to a deleted agent");
     }
+    this._assertCurrentActiveSessionLocator(sessionPath, "ensureSessionLoaded");
     const existing = this._getSessionEntryByPath(sessionPath);
     if (existing) {
       existing.lastTouchedAt = Date.now();
@@ -3688,7 +4170,7 @@ export class SessionCoordinator {
       try { files = await fsp.readdir(archDir); } catch { return []; }
       const titles = await this._loadSessionTitlesFor(sessionDir).catch(() => ({}));
       const rows = await Promise.all(files
-        .filter((f) => f.endsWith(".jsonl"))
+        .filter(isSessionJsonlFilename)
         .map(async (f) => {
           const full = path.join(archDir, f);
           try {
@@ -3764,8 +4246,10 @@ export class SessionCoordinator {
     try {
       const stat = await fsp.stat(metaPath);
       if (stat.size > SESSION_META_INDEX_MAX_BYTES) {
-        log.warn(`session-meta is too large to parse safely (${stat.size} bytes): ${metaPath}`);
-        return {};
+        const compacted = await this._compactOversizedSessionMeta(metaPath);
+        const data = await this._hydrateSessionMetaPayloads(metaPath, compacted);
+        this._metaCache.set(metaPath, { data, ts: Date.now() });
+        return data;
       }
       const raw = await fsp.readFile(metaPath, "utf-8");
       const data = await this._hydrateSessionMetaPayloads(metaPath, JSON.parse(raw));
@@ -3943,8 +4427,10 @@ export class SessionCoordinator {
         delete meta[sessKey].model;
         delete meta[sessKey].modelId;
         meta[sessKey] = await this._externalizeSessionMetaPayloads(metaPath, sessKey, meta[sessKey]);
-        await fsp.writeFile(metaPath, JSON.stringify(meta, null, 2));
+        const compactedMeta = await this._externalizeSessionMetaForIndexBudget(metaPath, meta);
+        await fsp.writeFile(metaPath, JSON.stringify(compactedMeta, null, 2));
         this.invalidateMetaCache(metaPath);
+        this._writeSessionCapabilitySnapshot(sessionPath, partial);
         return;
       } catch (err) {
         if (attempt === 0) {
@@ -3977,8 +4463,7 @@ export class SessionCoordinator {
     try {
       const stat = await fsp.stat(metaPath);
       if (stat.size > SESSION_META_INDEX_MAX_BYTES) {
-        await this._quarantineOversizedSessionMeta(metaPath);
-        return {};
+        return await this._compactOversizedSessionMeta(metaPath);
       }
     } catch (err) {
       if (err?.code !== "ENOENT") {
@@ -4009,8 +4494,79 @@ export class SessionCoordinator {
     }
   }
 
-  async _externalizeSessionMetaPayloads(metaPath: any, sessKey: any, entry: any) {
+  async _compactOversizedSessionMeta(metaPath: any) {
+    let data;
+    try {
+      data = JSON.parse(await fsp.readFile(metaPath, "utf-8"));
+    } catch {
+      await this._quarantineOversizedSessionMeta(metaPath);
+      return {};
+    }
+    if (!data || typeof data !== "object" || Array.isArray(data)) {
+      await this._quarantineOversizedSessionMeta(metaPath);
+      return {};
+    }
+    const compacted: any = {};
+    for (const [sessKey, entry] of Object.entries(data)) {
+      compacted[sessKey] = await this._externalizeSessionMetaPayloads(metaPath, sessKey, entry);
+    }
+    const budgeted = await this._externalizeSessionMetaForIndexBudget(metaPath, compacted);
+    await fsp.writeFile(metaPath, JSON.stringify(budgeted, null, 2));
+    this.invalidateMetaCache(metaPath);
+    log.warn(`oversized session-meta compacted with payload sidecars: ${metaPath}`);
+    return budgeted;
+  }
+
+  _sessionMetaIndexSizeBytes(data: any) {
+    try {
+      return Buffer.byteLength(JSON.stringify(data, null, 2), "utf-8");
+    } catch {
+      return Number.POSITIVE_INFINITY;
+    }
+  }
+
+  _sessionMetaPayloadSizeBytes(value: any) {
+    try {
+      return Buffer.byteLength(JSON.stringify(value), "utf-8");
+    } catch {
+      return 0;
+    }
+  }
+
+  async _externalizeSessionMetaForIndexBudget(metaPath: any, meta: any) {
+    if (this._sessionMetaIndexSizeBytes(meta) <= SESSION_META_INDEX_MAX_BYTES) return meta;
+
+    const next = { ...meta };
+    const candidates: any[] = [];
+    for (const [sessKey, entry] of Object.entries(next)) {
+      if (!entry || typeof entry !== "object" || Array.isArray(entry)) continue;
+      for (const field of SESSION_META_PAYLOAD_FIELDS) {
+        const value = (entry as any)[field];
+        if (value === undefined || this._isSessionMetaPayloadRef(value, field)) continue;
+        const byteLength = this._sessionMetaPayloadSizeBytes(value);
+        if (byteLength <= 0) continue;
+        candidates.push({ sessKey, field, byteLength });
+      }
+    }
+
+    candidates.sort((a, b) => b.byteLength - a.byteLength);
+    for (const candidate of candidates) {
+      next[candidate.sessKey] = await this._externalizeSessionMetaPayloads(
+        metaPath,
+        candidate.sessKey,
+        next[candidate.sessKey],
+        { forceFields: new Set([candidate.field]) },
+      );
+      if (this._sessionMetaIndexSizeBytes(next) <= SESSION_META_INDEX_MAX_BYTES) break;
+    }
+    return next;
+  }
+
+  async _externalizeSessionMetaPayloads(metaPath: any, sessKey: any, entry: any, options: any = {}) {
     if (!entry || typeof entry !== "object" || Array.isArray(entry)) return entry;
+    const forceFields = options?.forceFields instanceof Set
+      ? options.forceFields
+      : new Set(Array.isArray(options?.forceFields) ? options.forceFields : []);
     const next = { ...entry };
     for (const field of SESSION_META_PAYLOAD_FIELDS) {
       const value = next[field];
@@ -4021,7 +4577,10 @@ export class SessionCoordinator {
       } catch {
         continue;
       }
-      if (Buffer.byteLength(encoded, "utf-8") <= SESSION_META_PAYLOAD_INLINE_LIMIT_BYTES) continue;
+      if (
+        !forceFields.has(field)
+        && Buffer.byteLength(encoded, "utf-8") <= SESSION_META_PAYLOAD_INLINE_LIMIT_BYTES
+      ) continue;
       const relPath = this._sessionMetaPayloadRelativePath(sessKey, field);
       const absPath = this._sessionMetaPayloadAbsolutePath(metaPath, relPath);
       await fsp.mkdir(path.dirname(absPath), { recursive: true });
@@ -4226,7 +4785,8 @@ export class SessionCoordinator {
    *   toolFilter, builtinFilter, extraCustomTools, signal,
    *   fileReadSessionPaths (string[] = parent session SessionFile scopes inherited as read-only),
    *   subagentContext (true = 走 subagent 专用 prompt：跳过记忆三段和团队名单),
-   *   allowHumanApproval (false = 后台执行遇到人工确认请求时快速返回未批准),
+   *   approvalPolicy ("deny_on_prompt" = 后台执行遇到人工确认请求时返回结构化 unavailable),
+   *   allowHumanApproval (false = 兼容字段，等价于 approvalPolicy deny_on_prompt),
    *   emitEvents (true 时将 session 事件转发到 EventBus),
    *   onSessionReady (sessionPath => void) 回调，session 创建后、prompt 执行前触发
    */
@@ -4354,6 +4914,9 @@ export class SessionCoordinator {
           getPermissionMode: () => execPermissionMode,
           permissionContext: { isSubagent: !!opts.subagentContext },
           allowHumanApproval: opts.allowHumanApproval !== false,
+          ...(opts.approvalPolicy ? { approvalPolicy: opts.approvalPolicy } : {}),
+          ...(opts.bridgeContext ? { bridgeContext: opts.bridgeContext } : {}),
+          ...(opts.notificationContext ? { notificationContext: opts.notificationContext } : {}),
         },
       );
 

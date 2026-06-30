@@ -61,6 +61,20 @@ const hanaFetchMock = vi.fn(async (url: string, init?: RequestInit) => {
             presentation: { type: 'toggle' },
           },
         },
+        {
+          id: 'memory.editable_facts',
+          titleKey: 'settings.experiments.editableMemory.title',
+          descriptionKey: 'settings.experiments.editableMemory.description',
+          owner: 'memory',
+          value: false,
+          status: 'alpha',
+          risk: 'medium',
+          restartPolicy: 'immediate',
+          valueSchema: {
+            type: 'boolean',
+            presentation: { type: 'toggle' },
+          },
+        },
       ],
     }));
   }
@@ -83,22 +97,17 @@ describe('ExperimentsTab', () => {
     vi.clearAllMocks();
   });
 
-  it('uses cache memory as the section title and keeps the cache intro above the card body', async () => {
-    const { container } = render(React.createElement(ExperimentsTab));
+  it('renders active memory experiments without showing retired cache snapshot controls', async () => {
+    render(React.createElement(ExperimentsTab));
 
     expect(screen.getByText('settings.experiments.memoryTitle')).toBeTruthy();
-    expect(screen.getByText('settings.experiments.cacheSnapshot.description')).toBeTruthy();
+    expect(await screen.findByText('settings.experiments.memorySectionDescription')).toBeTruthy();
     expect(screen.getByText('settings.computerUse.title')).toBeTruthy();
     expect(screen.queryByText('settings.experiments.description')).toBeNull();
 
-    await waitFor(() => {
-      expect(screen.getByText('settings.experiments.empty')).toBeTruthy();
-    });
-
-    const body = Array.from(container.querySelectorAll('[class*="sectionBody"]'))
-      .find((sectionBody) => sectionBody.textContent?.includes('settings.experiments.empty'));
-    expect(body?.textContent).toContain('settings.experiments.empty');
-    expect(body?.textContent).not.toContain('settings.experiments.cacheSnapshot.description');
+    expect(screen.getByText('settings.experiments.editableMemory.title')).toBeTruthy();
+    expect(screen.queryByText('settings.experiments.cacheSnapshot.title')).toBeNull();
+    expect(screen.queryByText('settings.experiments.cacheSnapshot.observeOnly')).toBeNull();
   });
 
   it('renders the three-mode compaction selector in experiments', async () => {

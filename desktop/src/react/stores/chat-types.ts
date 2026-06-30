@@ -222,7 +222,9 @@ export type RichBlock =
   | {
     type: 'interlude';
     id: string;
+    deliveryId?: string;
     variant: 'deferred_result' | string;
+    timelinePlacement?: 'after_anchor_message' | string;
     taskId?: string;
     status?: 'success' | 'failed' | 'aborted' | string;
     sourceKind?: 'subagent' | 'workflow' | 'tool' | string;
@@ -261,7 +263,8 @@ export type RichBlock =
     startedAt?: number | null;
     finishedAt?: number | null;
   }
-  | { type: 'plugin_card'; card: import('../types').PluginCardDetails };
+  | { type: 'plugin_card'; card: import('../types').PluginCardDetails }
+  | { type: 'interactive_card'; cardId: string; title: string; code: string };
 
 export type ContentBlock = TextDecorator | RichBlock;
 

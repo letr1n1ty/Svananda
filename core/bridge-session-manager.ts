@@ -54,9 +54,25 @@ import {
   normalizeSessionThinkingLevel,
   resolveModelDefaultThinkingLevel,
 } from "./session-thinking-level.ts";
-import { repairRestoredToolSnapshot, sameToolNames } from "./tool-snapshot-repair.ts";
+import { sameToolNames } from "./tool-snapshot-repair.ts";
 
 const log = createModuleLogger("bridge-session");
+const BRIDGE_OWNER_DENIED_TOOL_NAMES = Object.freeze([
+  "computer",
+  "browser",
+  "hana_card_guide",
+  "show_card",
+]);
+
+function computeBridgeOwnerActiveToolNames(allToolNames) {
+  const denied = new Set(BRIDGE_OWNER_DENIED_TOOL_NAMES);
+  return uniqueToolNames(allToolNames).filter((name) => !denied.has(name));
+}
+
+function filterBridgeOwnerToolObjects(tools) {
+  const denied = new Set(BRIDGE_OWNER_DENIED_TOOL_NAMES);
+  return (tools || []).filter((tool) => tool?.name && !denied.has(tool.name));
+}
 
 function assertVideoInputSupported(model, videos) {
   if (!videos?.length) return;
@@ -972,7 +988,6 @@ export class BridgeSessionManager {
         sessionOpts = this._buildOwnerSessionOpts(agent, mm, homeCwd, sessionPathRef, targetModelRef, {
           bridgeContext,
           promptSnapshot,
-          toolNames: entry.toolNames,
         });
       }
       const activeToolNames = this._normalizeToolNames(sessionOpts.activeToolNames);
@@ -1360,11 +1375,12 @@ export class BridgeSessionManager {
       },
     });
 
+    const ownerTools = filterBridgeOwnerToolObjects(baseTools);
+    const ownerCustomTools = filterBridgeOwnerToolObjects(baseCustomTools);
     const allToolNames = uniqueToolNames([
-      ...(baseTools || []).map((tool) => tool?.name),
-      ...(baseCustomTools || []).map((tool) => tool?.name),
+      ...ownerTools.map((tool) => tool?.name),
+      ...ownerCustomTools.map((tool) => tool?.name),
     ]);
-    const restoredToolNames = this._normalizeToolNames(opts.toolNames);
 
     return {
       model: ownerModel,
@@ -1373,12 +1389,10 @@ export class BridgeSessionManager {
         normalizeSessionThinkingLevel(prefs?.thinking_level),
       )),
       resourceLoader: visionResourceLoader,
-      tools: baseTools,
-      customTools: baseCustomTools,
+      tools: ownerTools,
+      customTools: ownerCustomTools,
       settingsManager: this._createSettings(ownerModel),
-      activeToolNames: restoredToolNames.length
-        ? repairRestoredToolSnapshot(restoredToolNames, allToolNames)
-        : allToolNames,
+      activeToolNames: computeBridgeOwnerActiveToolNames(allToolNames),
     };
   }
 
@@ -1454,7 +1468,6 @@ export class BridgeSessionManager {
     const sessionOpts = this._buildOwnerSessionOpts(agent, mm, homeCwd, { current: sessionFilePath }, { current: null }, {
       bridgeContext,
       promptSnapshot,
-      toolNames: entry.toolNames,
     });
     const activeToolNames = this._normalizeToolNames(sessionOpts.activeToolNames);
     delete sessionOpts.activeToolNames;

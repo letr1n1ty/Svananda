@@ -276,7 +276,15 @@ export function ProviderModelList({ providerId, summary, onRefresh }: {
               onChange={(e) => setSearch(e.target.value)}
               autoFocus
             />
-            <div className={styles['pv-model-dropdown-list']}>
+            <div
+              className={styles['pv-model-dropdown-list']}
+              /* Radix Dialog 的 RemoveScroll 在 document(bubble) 上攔截 wheel 並對
+                 鎖定範圍外的元素 preventDefault（shards 僅含 Content 自身），導致
+                 portal 到 body 的下拉清單無法捲動。這裡 stopPropagation 阻止事件
+                 冒泡到 document 的 shouldPrevent，使清單自身的原生捲動恢復正常；
+                 不呼叫 preventDefault，故不影響清單捲動的預設行為。 */
+              onWheel={(e) => e.stopPropagation()}
+            >
               {filtered.map(mid => {
                 const isAdded = currentModelIds.includes(mid);
                 const meta = lookupModelMeta(mid, providerId) || {};

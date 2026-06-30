@@ -81,6 +81,20 @@ export function SettingsModalShellV2() {
                 target.focus();
               }
             }}
+            onPointerDownOutside={(event) => {
+              // 設定面板內的模型下拉 (data-provider-model-dropdown) 與 SelectWidget popup
+              // (data-select-widget-popup) 透過 createPortal(document.body) 渲染到 Dialog
+              // Content 的 DOM 子樹之外，會被 Radix DismissableLayer 誤判為 outside
+              // interaction 而關閉整個設定視窗。這裡辨認這些浮層並阻止關閉，讓使用者能正常
+              // 點選下拉項目；浮層自身的 outside-click 關閉邏輯不受影響。
+              const target = event.target;
+              if (
+                target instanceof Element
+                && target.closest('[data-select-widget-popup],[data-provider-model-dropdown]')
+              ) {
+                event.preventDefault();
+              }
+            }}
           >
             <SettingsContent
               variant="modal"

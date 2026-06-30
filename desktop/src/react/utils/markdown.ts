@@ -13,7 +13,8 @@ import mk from '@traptitech/markdown-it-katex';
 import taskLists from 'markdown-it-task-lists';
 import 'katex/dist/katex.min.css';
 import { sanitizeMarkdownPreviewHtml } from './markdown-html-sanitizer';
-import { extOfName, isImageOrSvgExt } from './file-kind';
+import { EXT_TO_KIND, extOfName, isImageOrSvgExt } from './file-kind';
+import { uniqueMarkdownHeadingId } from './markdown-document';
 
 type MarkdownItInstance = ReturnType<typeof markdownit>;
 type MarkdownRenderEnv = {
@@ -479,8 +480,24 @@ function isAutoLinkifyToken(token: Token | undefined, type: 'link_open' | 'link_
   return token?.type === type && token.markup === 'linkify' && token.info === 'auto';
 }
 
+const WINDOWS_ABSOLUTE_PATH_RE = /^[A-Za-z]:[\\/]/;
+const SCHEME_RE = /^[A-Za-z][A-Za-z0-9+.-]*:/;
+
+function isKnownLocalFileExtension(text: string): boolean {
+  const ext = extOfName(text);
+  return Boolean(ext && EXT_TO_KIND[ext]);
+}
+
+function isLikelyLocalFileAutolink(text: string): boolean {
+  const value = text.trim();
+  if (!value) return false;
+  if (value.includes('@')) return false;
+  if (SCHEME_RE.test(value) && !WINDOWS_ABSOLUTE_PATH_RE.test(value)) return false;
+  return isKnownLocalFileExtension(value);
+}
+
 function trimAutoLinkifiedSuffixes(md: MarkdownItInstance): void {
-  md.core.ruler.after('inline', 'trim_auto_linkified_suffixes', (state: StateCore) => {
+  md.core.ruler.after('linkify', 'trim_auto_linkified_suffixes', (state: StateCore) => {
     for (const blockToken of state.tokens) {
       const children = blockToken.children;
       if (!children?.length) continue;
@@ -509,6 +526,27 @@ function trimAutoLinkifiedSuffixes(md: MarkdownItInstance): void {
           children.splice(index + 3, 0, suffixToken);
         }
         index += 2;
+      }
+    }
+  });
+}
+
+function unwrapLocalFileAutoLinks(md: MarkdownItInstance): void {
+  md.core.ruler.after('trim_auto_linkified_suffixes', 'unwrap_local_file_auto_links', (state: StateCore) => {
+    for (const blockToken of state.tokens) {
+      const children = blockToken.children;
+      if (!children?.length) continue;
+
+      for (let index = 0; index < children.length - 2; index += 1) {
+        const open = children[index];
+        const text = children[index + 1];
+        const close = children[index + 2];
+        if (!isAutoLinkifyToken(open, 'link_open') || text?.type !== 'text' || !isAutoLinkifyToken(close, 'link_close')) {
+          continue;
+        }
+        if (!isLikelyLocalFileAutolink(text.content)) continue;
+
+        children.splice(index, 3, text);
       }
     }
   });
@@ -913,9 +951,27 @@ function applyMarkdownPlugins(md: MarkdownItInstance): void {
   md.use(obsidianHighlights);
   md.use(obsidianCallouts);
   md.use(footnotes);
+  md.use(markdownHeadingAnchors);
   md.use(trimAutoLinkifiedSuffixes);
+  md.use(unwrapLocalFileAutoLinks);
   md.use(mermaidFences);
   md.use(markdownImageRenderer);
+  md.use(markdownTableScrollWrapper);
+}
+
+function markdownHeadingAnchors(md: MarkdownItInstance): void {
+  md.core.ruler.push('hana_heading_anchors', (state: StateCore) => {
+    const seen = new Map<string, number>();
+    for (let i = 0; i < state.tokens.length; i += 1) {
+      const token = state.tokens[i];
+      if (token.type !== 'heading_open') continue;
+      const inline = state.tokens[i + 1];
+      if (!inline || inline.type !== 'inline') continue;
+      const text = inline.content.trim();
+      if (!text) continue;
+      token.attrSet('id', uniqueMarkdownHeadingId(text, seen));
+    }
+  });
 }
 
 function fenceLanguage(info: string): string {
@@ -965,6 +1021,21 @@ function markdownImageRenderer(md: MarkdownItInstance): void {
 
     return self.renderToken(tokens, idx, options);
   };
+}
+
+function markdownTableScrollWrapper(md: MarkdownItInstance): void {
+  const defaultTableOpen = md.renderer.rules.table_open
+    ?? ((tokens, idx, options, _env, self) => self.renderToken(tokens, idx, options));
+  const defaultTableClose = md.renderer.rules.table_close
+    ?? ((tokens, idx, options, _env, self) => self.renderToken(tokens, idx, options));
+
+  md.renderer.rules.table_open = (tokens, idx, options, env, self) => (
+    `<div class="markdown-table-scroll">\n${defaultTableOpen(tokens, idx, options, env, self)}`
+  );
+
+  md.renderer.rules.table_close = (tokens, idx, options, env, self) => (
+    `${defaultTableClose(tokens, idx, options, env, self)}</div>\n`
+  );
 }
 
 function buildMarkdownEnv(src: string, options: MarkdownPreviewOptions = {}): MarkdownRenderEnv {

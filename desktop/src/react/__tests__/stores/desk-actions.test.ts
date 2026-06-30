@@ -43,6 +43,9 @@ describe('desk-actions workspace roots', () => {
     };
     useStore.setState({
       serverPort: 62950,
+      activeServerConnection: null,
+      activeServerConnectionId: null,
+      serverConnections: {},
       deskBasePath: '',
       deskWorkspaceMountId: null,
       deskWorkspaceLabel: null,
@@ -381,6 +384,21 @@ describe('desk-actions workspace roots', () => {
       previewOpen: true,
       openTabs: ['file-/workspace/src/App.tsx', 'memory-note'],
       activeTabId: 'file-/workspace/src/App.tsx',
+      previewReadingPositions: {
+        'file-/workspace/src/App.tsx': {
+          preview: {
+            scrollTop: 320,
+            scrollHeight: 1400,
+            clientHeight: 700,
+            ratio: 0.5,
+            anchorId: 'intro',
+            contentHash: 'hash-a',
+          },
+          currentHeadingId: 'intro',
+          currentHeadingText: 'Intro',
+          contentHash: 'hash-a',
+        },
+      },
       previewItems: [
         {
           id: 'file-/workspace/src/App.tsx',
@@ -390,6 +408,7 @@ describe('desk-actions workspace roots', () => {
           filePath: '/workspace/src/App.tsx',
           ext: 'tsx',
           language: 'tsx',
+          sourceRootPath: '/workspace',
         },
         {
           id: 'memory-note',
@@ -428,6 +447,20 @@ describe('desk-actions workspace roots', () => {
           type: 'code',
           ext: 'tsx',
           language: 'tsx',
+          sourceRootPath: '/workspace',
+          readingPosition: {
+            preview: {
+              scrollTop: 320,
+              scrollHeight: 1400,
+              clientHeight: 700,
+              ratio: 0.5,
+              anchorId: 'intro',
+              contentHash: 'hash-a',
+            },
+            currentHeadingId: 'intro',
+            currentHeadingText: 'Intro',
+            contentHash: 'hash-a',
+          },
         }],
       },
     });
@@ -578,6 +611,15 @@ describe('desk-actions workspace roots', () => {
             type: 'code',
             ext: 'tsx',
             language: 'tsx',
+            readingPosition: {
+              preview: {
+                scrollTop: 144,
+                ratio: 0.25,
+                anchorId: 'setup',
+              },
+              currentHeadingId: 'setup',
+              currentHeadingText: 'Setup',
+            },
           },
         ],
       },
@@ -599,6 +641,17 @@ describe('desk-actions workspace roots', () => {
     expect(useStore.getState().previewOpen).toBe(true);
     expect(useStore.getState().openTabs).toEqual(['file-src/react/App.tsx']);
     expect(useStore.getState().activeTabId).toBe('file-src/react/App.tsx');
+    expect(useStore.getState().previewReadingPositions).toEqual({
+      'file-src/react/App.tsx': {
+        preview: {
+          scrollTop: 144,
+          ratio: 0.25,
+          anchorId: 'setup',
+        },
+        currentHeadingId: 'setup',
+        currentHeadingText: 'Setup',
+      },
+    });
     expect(useStore.getState().previewItems).toEqual([
       expect.objectContaining({
         id: 'file-src/react/App.tsx',
@@ -612,9 +665,12 @@ describe('desk-actions workspace roots', () => {
   });
 
   it('hydrates persisted preview metadata needed by PDF and HTML renderers', async () => {
-    const { hydratePersistedPreviewItems } = await import('../../stores/workspace-ui-state-actions');
+    const {
+      hydratePersistedPreviewItems,
+      readingPositionsFromPersistedWorkspaceUiState,
+    } = await import('../../stores/workspace-ui-state-actions');
 
-    const items = await hydratePersistedPreviewItems('/workspace', {
+    const persisted = {
       previewTabs: [
         {
           id: 'file-docs/report.pdf',
@@ -629,9 +685,21 @@ describe('desk-actions workspace roots', () => {
           title: 'demo.html',
           type: 'html',
           ext: 'html',
+          sourceRootPath: '/workspace',
+          readingPosition: {
+            preview: {
+              scrollTop: 64,
+              ratio: 0.2,
+              anchorId: 'demo',
+            },
+            currentHeadingId: 'demo',
+            currentHeadingText: 'Demo',
+          },
         },
       ],
-    });
+    };
+
+    const items = await hydratePersistedPreviewItems('/workspace', persisted);
 
     expect(window.platform?.getFileUrl).toHaveBeenCalledWith('/workspace/docs/report.pdf');
     expect(items).toEqual([
@@ -650,6 +718,17 @@ describe('desk-actions workspace roots', () => {
         sourceRootPath: '/workspace',
       }),
     ]);
+    expect(readingPositionsFromPersistedWorkspaceUiState(persisted, ['file-pages/demo.html'])).toEqual({
+      'file-pages/demo.html': {
+        preview: {
+          scrollTop: 64,
+          ratio: 0.2,
+          anchorId: 'demo',
+        },
+        currentHeadingId: 'demo',
+        currentHeadingText: 'Demo',
+      },
+    });
   });
 
   it('renames a tree item by explicit parent subdir and updates that tree cache', async () => {
@@ -891,6 +970,55 @@ describe('desk-actions workspace roots', () => {
     const ok = await deskTrashTreeItems([{ sourceSubdir: 'notes', name: 'chapter.md', isDirectory: false }]);
 
     expect(ok).toBe(true);
+    expect(mockHanaFetch).toHaveBeenCalledWith('/api/workbench/actions', expect.objectContaining({
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: 'safeDelete',
+        mountId: 'default',
+        subdir: 'notes',
+        name: 'chapter.md',
+      }),
+    }));
+    expect(useStore.getState().deskTreeFilesByPath.notes).toEqual([]);
+  });
+
+  it('safe-deletes default workspace tree items through ResourceIO for remote desktop clients', async () => {
+    const trashItem = vi.fn(async () => true);
+    window.platform = { trashItem } as unknown as typeof window.platform;
+    useStore.setState({
+      activeServerConnection: {
+        connectionId: 'browser:server_lan',
+        kind: 'lan',
+        serverId: 'server_lan',
+        userId: 'user_lan',
+        studioId: 'studio_lan',
+        label: 'LAN Hana',
+        baseUrl: 'http://hana.local:14500',
+        wsUrl: 'ws://hana.local:14500',
+        token: null,
+        authState: 'paired',
+        trustState: 'lan',
+        credentialKind: 'device_credential',
+        platformAccountId: null,
+        officialServiceKind: null,
+        capabilities: ['resources', 'files'],
+      },
+      deskBasePath: '/server/workspace',
+      deskTreeFilesByPath: {
+        notes: [{ name: 'chapter.md', isDir: false }],
+      },
+    } as never);
+    mockHanaFetch.mockResolvedValueOnce(jsonResponse({
+      ok: true,
+      files: [],
+    }));
+
+    const { deskTrashTreeItems } = await import('../../stores/desk-actions');
+    const ok = await deskTrashTreeItems([{ sourceSubdir: 'notes', name: 'chapter.md', isDirectory: false }]);
+
+    expect(ok).toBe(true);
+    expect(trashItem).not.toHaveBeenCalled();
     expect(mockHanaFetch).toHaveBeenCalledWith('/api/workbench/actions', expect.objectContaining({
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

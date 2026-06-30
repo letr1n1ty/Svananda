@@ -5,7 +5,7 @@ import path from "path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import ExcelJS from "exceljs";
 
-import { execute as readDocument } from "../plugins/office/tools/read-document.ts";
+import { execute as readDocument, parameters as readDocumentParameters } from "../plugins/office/tools/read-document.ts";
 import { execute as listCapabilities } from "../plugins/office/tools/list-capabilities.ts";
 import { renderHtmlToPdf } from "../plugins/office/lib/html-to-pdf.ts";
 import { isOfficeEnabledForAgentConfig } from "../plugins/office/lib/availability.ts";
@@ -93,6 +93,28 @@ describe("office plugin tools", () => {
     expect(isOfficeEnabledForAgentConfig({ tools: { disabled: ["office"] } })).toBe(false);
   });
 
+  it("keeps read-document parameters compatible with Moonshot/Kimi root schema rules", () => {
+    expect(readDocumentParameters).toMatchObject({
+      type: "object",
+      properties: expect.objectContaining({
+        resource: expect.objectContaining({ type: "object" }),
+        filePath: expect.objectContaining({ type: "string" }),
+      }),
+    });
+    expect(readDocumentParameters).not.toHaveProperty("anyOf");
+    expect(readDocumentParameters).not.toHaveProperty("required");
+  });
+
+  it("validates missing read-document input at runtime", async () => {
+    const result = await readDocument({});
+
+    expect(result.content[0].text).toContain("office_read-document requires resource or filePath");
+    expect(result.details.error).toMatchObject({
+      code: "OFFICE_READ_FAILED",
+      message: "office_read-document requires resource or filePath",
+    });
+  });
+
   it("reads xlsx workbooks as structured JSON", async () => {
     const filePath = path.join(tempDir, "report.xlsx");
     const workbook = new ExcelJS.Workbook();
@@ -112,6 +134,38 @@ describe("office plugin tools", () => {
       ],
     });
     expect(result.content[0].text).toContain('"sheetCount": 1');
+  });
+
+  it("reads documents from ResourceIO refs by materializing through plugin resources", async () => {
+    const filePath = path.join(tempDir, "resource-note.md");
+    fs.writeFileSync(filePath, "hello from resource ref", "utf-8");
+    const materialize = vi.fn(async () => ({
+      filePath,
+      resourceKey: "mount:docs/resource-note.md",
+      resource: { kind: "mount", mountId: "docs", path: "resource-note.md" },
+    }));
+
+    const result = await readDocument({
+      resource: { kind: "mount", mountId: "docs", path: "resource-note.md" },
+    }, {
+      resources: { materialize },
+    });
+
+    expect(materialize).toHaveBeenCalledWith({ kind: "mount", mountId: "docs", path: "resource-note.md" });
+    expect(result.content[0].text).toContain("hello from resource ref");
+    expect(result.details.office).toMatchObject({
+      filePath,
+      resourceKey: "mount:docs/resource-note.md",
+    });
+  });
+
+  it("declares ResourceIO materialize/read capabilities for Office document reads", () => {
+    const manifest = JSON.parse(fs.readFileSync(path.join(process.cwd(), "plugins", "office", "manifest.json"), "utf-8"));
+
+    expect(manifest.capabilities).toEqual(expect.arrayContaining([
+      "resource.read",
+      "resource.materialize",
+    ]));
   });
 
   it("reads xlsm workbooks through the same structured workbook path", async () => {

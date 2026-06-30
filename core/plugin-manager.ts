@@ -22,6 +22,16 @@ const PLUGIN_SOURCE_EXTS = [".ts", ".js"];
 function isPluginSourceFile(filename) {
   return PLUGIN_SOURCE_EXTS.some((ext) => filename.endsWith(ext));
 }
+
+function hasSkillSourceEntry(skillsDir) {
+  if (!fs.existsSync(skillsDir)) return false;
+  for (const entry of fs.readdirSync(skillsDir, { withFileTypes: true })) {
+    if (entry.isFile() && entry.name.endsWith(".md")) return true;
+    if (entry.isDirectory() && fs.existsSync(path.join(skillsDir, entry.name, "SKILL.md"))) return true;
+  }
+  return false;
+}
+
 function resolvePluginEntry(pluginDir) {
   for (const ext of PLUGIN_SOURCE_EXTS) {
     const p = path.join(pluginDir, `index${ext}`);
@@ -39,6 +49,9 @@ const KNOWN_UI_HOST_CAPABILITIES = new Set([
   "external.open",
   "clipboard.writeText",
   "sessionFile.open",
+  "resource.open",
+  "resource.pick",
+  "resource.requestAccess",
 ]);
 const DEFAULT_PLUGIN_LOAD_TIMEOUT_MS = 15_000;
 const PLUGIN_SOURCE_PRIORITY = Object.freeze({
@@ -222,6 +235,9 @@ export class PluginManager {
   declare _preferencesManager: any;
   declare _providerPlugins: any;
   declare _registerSessionFile: any;
+  declare _emitResourceChanged: any;
+  declare _resourceIO: any;
+  declare _resourceWatch: any;
   declare _routeApps: any;
   declare _runtimeContext: any;
   declare _scanned: any;
@@ -245,6 +261,9 @@ export class PluginManager {
     appVersion,
     getSessionPath,
     registerSessionFile,
+    emitResourceChanged,
+    resourceIO,
+    resourceWatch,
     slashRegistry,
     loadTimeoutMs,
     lifecycleTimeoutMs,
@@ -258,6 +277,9 @@ export class PluginManager {
     this._appVersion = appVersion || "0.0.0";
     this._getSessionPath = getSessionPath || (() => null);
     this._registerSessionFile = registerSessionFile || null;
+    this._emitResourceChanged = typeof emitResourceChanged === "function" ? emitResourceChanged : null;
+    this._resourceIO = resourceIO || null;
+    this._resourceWatch = resourceWatch || null;
     this._logSink = typeof logSink === "function" ? logSink : null;
     this._runtimeContext = runtimeContext || null;
     this._plugins = new Map();
@@ -676,6 +698,9 @@ export class PluginManager {
       bus: this._bus,
       accessLevel,
       registerSessionFile: this._registerSessionFile,
+      emitResourceChanged: this._emitResourceChanged,
+      resourceIO: this._resourceIO,
+      resourceWatch: this._resourceWatch,
       configSchema: entry.configSchema,
       logSink: this._logSink,
       runtimeContext: this._runtimeContext,
@@ -811,6 +836,7 @@ export class PluginManager {
           parameters: mod.parameters ?? {},
           ...(mod.promptSnippet ? { promptSnippet: mod.promptSnippet } : {}),
           ...(mod.promptGuidelines ? { promptGuidelines: mod.promptGuidelines } : {}),
+          ...(mod.sessionPermission && typeof mod.sessionPermission === "object" ? { sessionPermission: mod.sessionPermission } : {}),
           ...(typeof mod.isEnabledForAgentConfig === "function" ? { isEnabledForAgentConfig: mod.isEnabledForAgentConfig } : {}),
           execute: async (_toolCallId, params, signalOrRuntimeCtx, _onUpdate, piCtx) => {
             await this.activatePlugin(entry.id, { event: `onToolCall:${mod.name}`, toolName: mod.name }, { pluginKey: entry.pluginKey });
@@ -821,9 +847,12 @@ export class PluginManager {
               || null;
             const sessionCtx = normalizeToolSessionRef(runtimeCtx, fallbackSessionPath);
             const helperCtx = withInvocationSessionHelpers(ctx, sessionCtx);
+            const invocationResources = typeof ctx.__createInvocationResources === "function"
+              ? ctx.__createInvocationResources({ ...runtimeCtx, ...sessionCtx })
+              : ctx.resources;
             const mergedCtx = hasExplicitCtx
-              ? { ...ctx, ...runtimeCtx, ...sessionCtx, ...helperCtx }
-              : { ...ctx, ...sessionCtx, ...helperCtx };
+              ? { ...ctx, ...runtimeCtx, ...sessionCtx, ...helperCtx, resources: invocationResources }
+              : { ...ctx, ...sessionCtx, ...helperCtx, resources: invocationResources };
             const raw = await origExecute(params, mergedCtx);
             return normalizePluginToolResult(raw, ctx.pluginId);
           },
@@ -878,6 +907,9 @@ export class PluginManager {
     if (toolDef.metadata && typeof toolDef.metadata === "object") {
       tool.metadata = { ...toolDef.metadata };
     }
+    if (toolDef.sessionPermission && typeof toolDef.sessionPermission === "object") {
+      tool.sessionPermission = toolDef.sessionPermission;
+    }
     this._tools.push(tool);
     return () => {
       const idx = this._tools.indexOf(tool);
@@ -919,7 +951,7 @@ export class PluginManager {
 
   async _loadSkillPaths(entry) {
     const skillsDir = path.join(entry.pluginDir, "skills");
-    if (!fs.existsSync(skillsDir)) return;
+    if (!hasSkillSourceEntry(skillsDir)) return;
     this._skillPaths.push({
       dirPath: skillsDir,
       label: `plugin:${entry.id}`,

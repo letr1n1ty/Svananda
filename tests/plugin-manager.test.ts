@@ -100,7 +100,7 @@ describe("scan", () => {
 });
 
 describe("loadAll", () => {
-  it("loads real bundled image-gen, beautify, mcp, and office plugin contributions", async () => {
+  it("loads real bundled media, image-gen, beautify, mcp, and office plugin contributions", async () => {
     const pm = new PluginManager({
       pluginsDirs: [path.resolve("plugins")],
       dataDir,
@@ -120,7 +120,7 @@ describe("loadAll", () => {
       await pm.loadAll();
 
       const diagnosticsById = new Map(pm.getDiagnostics().map((entry) => [entry.id, entry]));
-      for (const id of ["image-gen", "beautify", "mcp", "office"]) {
+      for (const id of ["media", "image-gen", "beautify", "mcp", "office"]) {
         expect(diagnosticsById.get(id)).toMatchObject({
           id,
           source: "builtin",
@@ -132,8 +132,9 @@ describe("loadAll", () => {
 
       const toolNames = pm.getAllTools().map((tool) => tool.name);
       expect(toolNames).toEqual(expect.arrayContaining([
-        "image-gen_generate-image",
-        "image-gen_generate-video",
+        "media_generate-image",
+        "media_generate-video",
+        "media_describe-options",
         "beautify_create-cover",
         "beautify_apply-cover-candidate",
         "beautify_get-cover-style-guide",
@@ -143,7 +144,11 @@ describe("loadAll", () => {
         "office_read-document",
         "office_html-to-pdf",
       ]));
+      expect(toolNames.filter((name) => name.startsWith("image-gen_"))).toEqual([]);
       expect(pm.getSkillPaths()).toEqual(expect.arrayContaining([
+        expect.objectContaining({ pluginId: "media", builtin: true }),
+      ]));
+      expect(pm.getSkillPaths()).not.toEqual(expect.arrayContaining([
         expect.objectContaining({ pluginId: "image-gen", builtin: true }),
       ]));
       expect(pm.routeRegistry.has("image-gen")).toBe(true);
@@ -157,7 +162,7 @@ describe("loadAll", () => {
         }),
       ]));
     } finally {
-      for (const id of ["image-gen", "beautify", "mcp", "office"]) {
+      for (const id of ["media", "image-gen", "beautify", "mcp", "office"]) {
         await pm.unloadPlugin(id, { source: "builtin" });
       }
     }
@@ -555,6 +560,27 @@ describe("tool loading", () => {
     expect(result.content[0].text).toBe("/sessions/static.jsonl:hello");
   });
 
+  it("preserves static plugin tool sessionPermission metadata", async () => {
+    const dir = path.join(pluginsDir, "static-permission");
+    fs.mkdirSync(path.join(dir, "tools"), { recursive: true });
+    fs.writeFileSync(path.join(dir, "tools", "status.js"), `
+      export const name = "status";
+      export const description = "Read plugin status";
+      export const parameters = {};
+      export const sessionPermission = { readOnly: true };
+      export async function execute() {
+        return "ok";
+      }
+    `);
+    const pm = new PluginManager({ pluginsDir, dataDir, bus: await makeBus() } as any);
+    pm.scan();
+    await pm.loadAll();
+
+    const tool = pm.getPluginTool("static-permission", "status");
+
+    expect(tool.sessionPermission).toEqual({ readOnly: true });
+  });
+
   it("finds plugin tools when the action id contains underscores", async () => {
     const dir = path.join(pluginsDir, "underscore-plugin");
     fs.mkdirSync(path.join(dir, "tools"), { recursive: true });
@@ -688,6 +714,61 @@ describe("tool loading", () => {
       size: 12,
       kind: "image",
     }]);
+  });
+
+  it("passes ResourceIO-backed resources into plugin tool context", async () => {
+    const resourceIO = {
+      read: vi.fn(async (ref) => ({
+        resourceKey: "mount:docs:note.md",
+        resource: ref,
+        content: Buffer.from("mounted note"),
+      })),
+    };
+    const dir = path.join(pluginsDir, "resource-tool-plugin");
+    fs.mkdirSync(path.join(dir, "tools"), { recursive: true });
+    fs.writeFileSync(path.join(dir, "manifest.json"), JSON.stringify({
+      id: "resource-tool-plugin",
+      capabilities: ["resource.read"],
+    }));
+    fs.writeFileSync(path.join(dir, "tools", "read-resource.js"), `
+      export const name = "read_resource";
+      export const description = "Read a resource";
+      export const parameters = {};
+      export async function execute(input, ctx) {
+        const result = await ctx.resources.read(input.resource);
+        return result.content.toString("utf-8");
+      }
+    `);
+    const pm = new PluginManager({
+      pluginsDir,
+      dataDir,
+      bus: await makeBus(),
+      resourceIO,
+    } as any);
+    pm.scan();
+    await pm.loadAll();
+
+    const tool = pm.getAllTools()[0];
+    const result = await tool.execute("call-1", {
+      resource: { kind: "mount", mountId: "docs", path: "note.md" },
+    }, {
+      sessionPath: "/sessions/plugin.jsonl",
+    });
+
+    expect(result.content[0].text).toBe("mounted note");
+    expect(resourceIO.read).toHaveBeenCalledWith(
+      { kind: "mount", mountId: "docs", path: "note.md" },
+      expect.objectContaining({
+        source: "plugin",
+        reason: "plugin:resource-tool-plugin:read",
+        sessionPath: "/sessions/plugin.jsonl",
+        principal: expect.objectContaining({
+          kind: "plugin",
+          pluginId: "resource-tool-plugin",
+          sessionPath: "/sessions/plugin.jsonl",
+        }),
+      }),
+    );
   });
 
   it("passes sessionId-first runtime context into plugin tools and staged files", async () => {
@@ -1200,6 +1281,34 @@ describe("addTool (dynamic registration)", () => {
 
     remove();
     expect(pm.getAllTools()).toHaveLength(0);
+  });
+
+  it("preserves dynamic plugin tool sessionPermission metadata", async () => {
+    const pm = new PluginManager({ pluginsDir, dataDir, bus: await makeBus() } as any);
+    const sessionPermission = {
+      kind: "external_side_effect",
+      describeSideEffect: vi.fn(() => ({
+        kind: "external_api",
+        summary: "Queries a remote MCP server.",
+        ruleId: "mcp-remote-query",
+      })),
+    };
+
+    const remove = pm.addTool("mcp-bridge", {
+      name: "github_search",
+      description: "MCP search tool",
+      sessionPermission,
+      execute: async () => "result",
+    });
+
+    const [tool] = pm.getAllTools();
+    expect(tool.sessionPermission).toBe(sessionPermission);
+    expect(tool.sessionPermission.describeSideEffect({ query: "hana" })).toMatchObject({
+      kind: "external_api",
+      ruleId: "mcp-remote-query",
+    });
+
+    remove();
   });
 
   it("invokes dynamic plugin tools with the SDK input/context signature", async () => {

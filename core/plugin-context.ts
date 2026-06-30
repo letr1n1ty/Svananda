@@ -2,26 +2,27 @@ import path from "path";
 import { serializeSessionFile } from "../lib/session-files/session-file-response.ts";
 import { createPluginConfigStore } from "./plugin-config.ts";
 
+type PluginWatchOptions = {
+  purpose?: unknown;
+  sessionPath?: unknown;
+  sessionRef?: {
+    sessionPath?: unknown;
+    path?: unknown;
+  } | null;
+};
+
+type PluginResourceWatchResult = {
+  subscriptionId?: unknown;
+  resourceKeys?: unknown;
+};
+
 /**
  * Create a PluginContext for a plugin.
- * @param {{ pluginId: string, pluginKey?: string, source?: string, pluginDir: string, dataDir: string, bus: object, accessLevel?: "full-access" | "restricted", permissions?: string[], capabilities?: string[] | null, sensitiveCapabilities?: string[] | null, network?: object | null, fetchImpl?: Function, registerSessionFile?: Function, configSchema?: object, logSink?: Function, runtimeContext?: object }} opts
+ * @param {{ pluginId: string, pluginKey?: string, source?: string, pluginDir: string, dataDir: string, bus: object, accessLevel?: "full-access" | "restricted", permissions?: string[], capabilities?: string[] | null, sensitiveCapabilities?: string[] | null, network?: object | null, fetchImpl?: Function, registerSessionFile?: Function, emitResourceChanged?: Function, resourceIO?: object | Function, resourceWatch?: object | Function, configSchema?: object, logSink?: Function, runtimeContext?: object }} opts
  */
-export function createPluginContext({ pluginId, pluginKey, source, pluginDir, dataDir, bus, accessLevel, permissions, capabilities, sensitiveCapabilities, network = null, fetchImpl = undefined, registerSessionFile: registerSessionFileImpl, configSchema, logSink, runtimeContext }) {
+export function createPluginContext({ pluginId, pluginKey, source, pluginDir, dataDir, bus, accessLevel, permissions, capabilities, sensitiveCapabilities, network = null, fetchImpl = undefined, registerSessionFile: registerSessionFileImpl, emitResourceChanged, resourceIO = null, resourceWatch = null, configSchema, logSink, runtimeContext }) {
   const config = createPluginConfigStore({ dataDir, schema: configSchema });
-  const runtimeScope = runtimeContext ? {
-    serverId: runtimeContext.serverId,
-    serverNodeId: runtimeContext.serverNodeId ?? runtimeContext.serverId,
-    userId: runtimeContext.userId,
-    studioId: runtimeContext.studioId,
-    connectionKind: runtimeContext.connectionKind,
-    credentialKind: runtimeContext.credentialKind,
-    platformAccountId: runtimeContext.platformAccountId ?? null,
-    officialServiceKind: runtimeContext.officialServiceKind ?? null,
-    executionBoundary: clonePlain(runtimeContext.executionBoundary),
-    sessionId: textOrNull(runtimeContext.sessionId),
-    sessionPath: textOrNull(runtimeContext.sessionPath),
-    sessionRef: normalizeSessionRef(runtimeContext.sessionRef, runtimeContext),
-  } : {};
+  const runtimeScope: any = runtimeContext ? normalizeRuntimeScope(runtimeContext) : {};
 
   const resolvedAccess = accessLevel || "restricted";
   const grantedPermissions = normalizePermissions(permissions);
@@ -34,10 +35,15 @@ export function createPluginContext({ pluginId, pluginKey, source, pluginDir, da
     sensitiveCapabilities: declaredSensitiveCapabilities,
     fetchImpl,
   });
-  const pluginBus = resolvedAccess === "full-access"
-    ? bus
-    : createRestrictedBusProxy(bus, grantedPermissions);
-
+  const createScopedPluginResources = (scope: any = {}) => createPluginResources({
+    pluginId,
+    resourceIO,
+    resourceWatch,
+    capabilities: declaredCapabilities,
+    sensitiveCapabilities: declaredSensitiveCapabilities,
+    runtimeScope: normalizeRuntimeScope(scope, runtimeScope),
+  });
+  const pluginResources = createScopedPluginResources();
   const prefix = `[plugin:${pluginId}]`;
   const recordLog = (level, args) => {
     if (typeof logSink !== "function") return;
@@ -53,6 +59,22 @@ export function createPluginContext({ pluginId, pluginKey, source, pluginDir, da
     error: (...args) => { recordLog("error", args); console.error(prefix, ...args); },
     debug: (...args) => { recordLog("debug", args); console.debug(prefix, ...args); },
   };
+  const ownerContext = Object.freeze({
+    kind: "plugin",
+    pluginId,
+    pluginKey: pluginKey || pluginId,
+    source: source || "community",
+    pluginDir,
+    dataDir,
+    generatedDir: path.join(dataDir, "generated"),
+    config,
+    log,
+  });
+  const pluginBus = createPluginBusProxy(bus, {
+    ownerContext,
+    grantedPermissions,
+    allowHandle: resolvedAccess === "full-access",
+  });
 
   function registerSessionFile(entry: any = {}) {
     if (typeof registerSessionFileImpl !== "function") {
@@ -102,7 +124,32 @@ export function createPluginContext({ pluginId, pluginKey, source, pluginDir, da
     return { file, mediaItem: toMediaItem(file) };
   }
 
-  return {
+  const appEvents = Object.freeze({
+    emit(type, payload: any = {}) {
+      const eventType = textOrNull(type);
+      if (!eventType) return false;
+      if (!isPlainObject(payload)) return false;
+      pluginBus.emit({
+        type: "app_event",
+        event: {
+          type: eventType,
+          payload,
+          source: `plugin:${pluginId}`,
+        },
+      }, null);
+      return true;
+    },
+  });
+
+  const resourceEvents = Object.freeze({
+    changed(input: any = {}) {
+      if (typeof emitResourceChanged !== "function") return false;
+      emitResourceChanged(input);
+      return true;
+    },
+  });
+
+  const context = {
     ...runtimeScope,
     pluginId,
     pluginKey: pluginKey || pluginId,
@@ -112,16 +159,25 @@ export function createPluginContext({ pluginId, pluginKey, source, pluginDir, da
     capabilities: declaredCapabilities,
     sensitiveCapabilities: declaredSensitiveCapabilities,
     bus: pluginBus,
+    appEvents,
+    resourceEvents,
+    resources: pluginResources,
     network: pluginNetwork,
     config,
     log,
     registerSessionFile,
     stageFile,
   };
+  Object.defineProperty(context, "__createInvocationResources", {
+    value: createScopedPluginResources,
+    enumerable: false,
+  });
+  return context;
 }
 
-function createRestrictedBusProxy(bus, grantedPermissions) {
-  const canReadUsage = hasPermission(grantedPermissions, "usage.read");
+function createPluginBusProxy(bus, { ownerContext, grantedPermissions, allowHandle }) {
+  const fullAccess = allowHandle === true;
+  const canReadUsage = fullAccess || hasPermission(grantedPermissions, "usage.read");
   const getCapability = typeof bus.getCapability === "function"
     ? bus.getCapability.bind(bus)
     : () => null;
@@ -132,32 +188,44 @@ function createRestrictedBusProxy(bus, grantedPermissions) {
     throw forbiddenBusError(type, action, "usage.read");
   };
 
-  return Object.freeze({
+  const proxy: Record<string, any> = {
     emit(event, sessionPath) {
-      if (event?.type === "llm_usage") {
+      if (!fullAccess && event?.type === "llm_usage") {
         throw forbiddenBusError("llm_usage", "emit", "usage.read");
       }
       return bus.emit(event, sessionPath);
     },
     subscribe(callback, filter = {}) {
       const requestedTypes = typesFromFilter(filter);
-      if (!canReadUsage && requestedTypes?.has("llm_usage")) {
+      if (!fullAccess && !canReadUsage && requestedTypes?.has("llm_usage")) {
         throw forbiddenBusError("llm_usage", "subscribe", "usage.read");
       }
       const wrapped = (event, sessionPath) => {
-        if (!canReadUsage && event?.type === "llm_usage") return;
+        if (!fullAccess && !canReadUsage && event?.type === "llm_usage") return;
         return callback(event, sessionPath);
       };
       return bus.subscribe(wrapped, filter);
     },
     async request(type, payload, options) {
       assertUsagePermission(type, "request");
-      return bus.request(type, payload, options);
+      if (typeof bus.request !== "function") {
+        throw new Error("plugin bus request unavailable");
+      }
+      return bus.request(type, payload, {
+        ...(options || {}),
+        caller: ownerContext,
+      });
     },
-    hasHandler: bus.hasHandler.bind(bus),
+    hasHandler: typeof bus.hasHandler === "function" ? bus.hasHandler.bind(bus) : () => false,
     listCapabilities: typeof bus.listCapabilities === "function" ? bus.listCapabilities.bind(bus) : () => [],
     getCapability,
-  });
+  };
+
+  if (allowHandle && typeof bus.handle === "function") {
+    proxy.handle = bus.handle.bind(bus);
+  }
+
+  return Object.freeze(proxy);
 }
 
 function normalizePermissions(permissions) {
@@ -199,6 +267,12 @@ function clonePlain(value) {
   return JSON.parse(JSON.stringify(value));
 }
 
+function isPlainObject(value) {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return false;
+  const proto = Object.getPrototypeOf(value);
+  return proto === Object.prototype || proto === null;
+}
+
 function textOrNull(value) {
   return typeof value === "string" && value.trim() ? value.trim() : null;
 }
@@ -213,6 +287,245 @@ function normalizeSessionRef(value, fallback: any = {}) {
     ...(sessionPath ? { sessionPath } : {}),
     ...(legacySessionPath ? { legacySessionPath } : {}),
   };
+}
+
+function normalizeRuntimeScope(value: any = {}, fallback: any = {}) {
+  const sessionId = textOrNull(value?.sessionId)
+    || textOrNull(value?.sessionRef?.sessionId)
+    || textOrNull(fallback.sessionId);
+  const sessionPath = textOrNull(value?.sessionPath)
+    || textOrNull(value?.sessionRef?.sessionPath)
+    || textOrNull(value?.sessionRef?.path)
+    || textOrNull(fallback.sessionPath);
+  const requestId = textOrNull(value?.requestId) || textOrNull(fallback.requestId);
+  const sessionRef = normalizeSessionRef(value?.sessionRef, {
+    ...(fallback.sessionRef || {}),
+    sessionId,
+    sessionPath,
+  }) || fallback.sessionRef || null;
+  return {
+    serverId: value?.serverId ?? fallback.serverId,
+    serverNodeId: value?.serverNodeId ?? value?.serverId ?? fallback.serverNodeId ?? fallback.serverId,
+    userId: value?.userId ?? fallback.userId,
+    studioId: value?.studioId ?? fallback.studioId,
+    connectionKind: value?.connectionKind ?? fallback.connectionKind,
+    credentialKind: value?.credentialKind ?? fallback.credentialKind,
+    platformAccountId: value?.platformAccountId ?? fallback.platformAccountId ?? null,
+    officialServiceKind: value?.officialServiceKind ?? fallback.officialServiceKind ?? null,
+    executionBoundary: clonePlain(value?.executionBoundary ?? fallback.executionBoundary),
+    sessionId: sessionId || null,
+    sessionPath: sessionPath || null,
+    requestId: requestId || null,
+    sessionRef,
+  };
+}
+
+function createPluginResources({ pluginId, resourceIO, resourceWatch, capabilities, sensitiveCapabilities, runtimeScope }) {
+  const getResourceIO = () => {
+    const resolved = typeof resourceIO === "function" ? resourceIO() : resourceIO;
+    if (resolved && typeof resolved === "object") return resolved;
+    throw pluginResourceError(
+      "PLUGIN_RESOURCE_IO_UNAVAILABLE",
+      "Plugin ResourceIO is unavailable in this runtime",
+      { pluginId },
+    );
+  };
+  const getResourceWatch = () => {
+    const resolved = typeof resourceWatch === "function" ? resourceWatch() : resourceWatch;
+    if (
+      resolved
+      && typeof resolved === "object"
+      && typeof resolved.subscribe === "function"
+      && typeof resolved.unsubscribe === "function"
+    ) {
+      return resolved;
+    }
+    throw pluginResourceError(
+      "PLUGIN_RESOURCE_WATCH_UNAVAILABLE",
+      "Plugin ResourceIO watch subscription is unavailable in this runtime",
+      { pluginId },
+    );
+  };
+  const assertCapability = (capability) => {
+    if (
+      hasCapabilityDeclaration(capabilities, capability)
+      || hasCapabilityDeclaration(sensitiveCapabilities, capability)
+    ) {
+      return;
+    }
+    throw pluginResourceError(
+      "PLUGIN_RESOURCE_CAPABILITY_NOT_DECLARED",
+      `Plugin ResourceIO operation requires manifest capability "${capability}"`,
+      { pluginId, capability },
+    );
+  };
+  const operationOptions = (operation, options: any = {}) => {
+    const sessionId = textOrNull(runtimeScope?.sessionId) || null;
+    const sessionPath = textOrNull(runtimeScope?.sessionPath) || null;
+    const requestId = textOrNull(runtimeScope?.requestId) || null;
+    return {
+      ...(options?.emit === false ? { emit: false } : {}),
+      ...(options?.auditRead === true ? { auditRead: true } : {}),
+      source: "plugin",
+      reason: `plugin:${pluginId}:${operation}`,
+      sessionId,
+      sessionPath,
+      requestId,
+      principal: {
+        kind: "plugin",
+        pluginId,
+        userId: textOrNull(runtimeScope?.userId) || null,
+        studioId: textOrNull(runtimeScope?.studioId) || null,
+        sessionId,
+        sessionPath,
+        connectionKind: textOrNull(runtimeScope?.connectionKind) || null,
+        credentialKind: textOrNull(runtimeScope?.credentialKind) || null,
+        requestId,
+      },
+    };
+  };
+  const watchOptions = (operation, options: PluginWatchOptions = {}) => ({
+    purpose: textOrNull(options?.purpose) || `plugin:${pluginId}:${operation}`,
+    sessionPath: textOrNull(options?.sessionPath)
+      || textOrNull(options?.sessionRef?.sessionPath)
+      || textOrNull(options?.sessionRef?.path)
+      || textOrNull(runtimeScope?.sessionPath)
+      || null,
+  });
+
+  return Object.freeze({
+    async stat(ref, options: any = {}) {
+      assertCapability("resource.read");
+      return getResourceIO().stat(ref, operationOptions("stat", options));
+    },
+    async read(ref, options: any = {}) {
+      assertCapability("resource.read");
+      return getResourceIO().read(ref, operationOptions("read", options));
+    },
+    async list(ref, options: any = {}) {
+      assertCapability("resource.read");
+      return getResourceIO().list(ref, operationOptions("list", options));
+    },
+    async search(ref, options: any = {}, operationContext: any = {}) {
+      assertCapability("resource.search");
+      return getResourceIO().search(ref, options, operationOptions("search", operationContext));
+    },
+    async materialize(ref, options: any = {}) {
+      assertCapability("resource.materialize");
+      return getResourceIO().materialize(ref, operationOptions("materialize", options));
+    },
+    async write(ref, content, options: any = {}) {
+      assertCapability("resource.write");
+      return getResourceIO().write(ref, content, operationOptions("write", options));
+    },
+    async writeExpectedVersion(ref, content, expectedVersion, options: any = {}) {
+      assertCapability("resource.write");
+      return getResourceIO().writeExpectedVersion(ref, content, expectedVersion, operationOptions("writeExpectedVersion", options));
+    },
+    async edit(ref, edits, options: any = {}) {
+      assertCapability("resource.write");
+      return getResourceIO().edit(ref, edits, operationOptions("edit", options));
+    },
+    async mkdir(ref, options: any = {}) {
+      assertCapability("resource.write");
+      return getResourceIO().mkdir(ref, operationOptions("mkdir", options));
+    },
+    async delete(ref, options: any = {}) {
+      assertCapability("resource.write");
+      return getResourceIO().delete(ref, operationOptions("delete", options));
+    },
+    async copy(from, to, options: any = {}) {
+      assertCapability("resource.write");
+      return getResourceIO().copy(from, to, operationOptions("copy", options));
+    },
+    async rename(from, to, options: any = {}) {
+      assertCapability("resource.write");
+      return getResourceIO().rename(from, to, operationOptions("rename", options));
+    },
+    async move(from, to, options: any = {}) {
+      assertCapability("resource.write");
+      return getResourceIO().move(from, to, operationOptions("move", options));
+    },
+    async trash(ref, trashOptions: any = {}, options: any = {}) {
+      assertCapability("resource.write");
+      return getResourceIO().trash(ref, trashOptions, operationOptions("trash", options));
+    },
+    watch(ref, options: PluginWatchOptions = {}) {
+      assertCapability("resource.watch");
+      const watcher = getResourceWatch();
+      const result = watcher.subscribe({
+        resource: ref,
+        ...watchOptions("watch", options),
+      });
+      return createPluginResourceWatchHandle(pluginId, watcher, result);
+    },
+    subscribe(resources, options: PluginWatchOptions = {}) {
+      assertCapability("resource.watch");
+      const watcher = getResourceWatch();
+      const result = watcher.subscribe({
+        resources: normalizeWatchResources(pluginId, resources),
+        ...watchOptions("subscribe", options),
+      });
+      return createPluginResourceWatchHandle(pluginId, watcher, result);
+    },
+    resolveWatchTarget(ref, options: any = {}) {
+      assertCapability("resource.watch");
+      const io = getResourceIO();
+      if (typeof io.resolveWatchTarget !== "function") {
+        throw pluginResourceError(
+          "PLUGIN_RESOURCE_WATCH_UNAVAILABLE",
+          "Plugin ResourceIO watch target resolution is unavailable in this runtime",
+          { pluginId },
+        );
+      }
+      return io.resolveWatchTarget(ref, operationOptions("watch", options));
+    },
+  });
+}
+
+function normalizeWatchResources(pluginId, resources) {
+  if (!Array.isArray(resources) || resources.length === 0) {
+    throw pluginResourceError(
+      "PLUGIN_RESOURCE_WATCH_INVALID_RESOURCES",
+      "Plugin ResourceIO subscribe requires a non-empty resources array",
+      { pluginId },
+    );
+  }
+  return resources;
+}
+
+function createPluginResourceWatchHandle(pluginId, watcher, result: PluginResourceWatchResult = {}) {
+  const subscriptionId = textOrNull(result?.subscriptionId);
+  if (!subscriptionId) {
+    throw pluginResourceError(
+      "PLUGIN_RESOURCE_WATCH_INVALID_SUBSCRIPTION",
+      "Plugin ResourceIO watch subscription did not return a subscriptionId",
+      { pluginId },
+    );
+  }
+  const resourceKeys = Array.isArray(result.resourceKeys)
+    ? result.resourceKeys.filter((key) => typeof key === "string" && key)
+    : [];
+  let closed = false;
+  const unsubscribe = () => {
+    if (closed) return false;
+    const released = watcher.unsubscribe(subscriptionId);
+    closed = true;
+    return released !== false;
+  };
+  return Object.freeze({
+    subscriptionId,
+    resourceKeys,
+    unsubscribe,
+    close: unsubscribe,
+  });
+}
+
+function pluginResourceError(code, message, extra: any = {}) {
+  const err: any = new Error(message);
+  err.code = code;
+  Object.assign(err, extra);
+  return err;
 }
 
 const DEFAULT_NETWORK_TIMEOUT_MS = 15_000;

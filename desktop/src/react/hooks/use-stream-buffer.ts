@@ -8,7 +8,7 @@
  * app-ws-shim 直接调用 streamBufferManager.handle(msg)。
  */
 
-import type { ChatListItem, ChatMessage, ContentBlock } from '../stores/chat-types';
+import type { ChatMessage, ContentBlock } from '../stores/chat-types';
 import { useStore } from '../stores';
 import { sessionScopedKey, sessionScopedValue } from '../stores/session-slice';
 import { renderMarkdown } from '../utils/markdown';
@@ -40,6 +40,7 @@ interface Buffer {
   moodAcc: string;
   moodYuan: string;
   inThinking: boolean;
+  hasThinkingBlock: boolean;
   inMood: boolean;
   inCard: boolean;
   cardAttrs: { type: string; plugin: string; route: string; title?: string } | null;
@@ -48,7 +49,6 @@ interface Buffer {
   flushTimer: ReturnType<typeof setTimeout> | null;
   /** 当前 turn 绑定的 assistant message id */
   messageId: string | null;
-  pendingInterludesByTaskId: Map<string, InterludeContentBlock[]>;
 }
 
 function createBuffer(sessionPath: string): Buffer {
@@ -59,6 +59,7 @@ function createBuffer(sessionPath: string): Buffer {
     moodAcc: '',
     moodYuan: 'hanako',
     inThinking: false,
+    hasThinkingBlock: false,
     inMood: false,
     inCard: false,
     cardAttrs: null,
@@ -66,7 +67,6 @@ function createBuffer(sessionPath: string): Buffer {
     lastFlushTime: 0,
     flushTimer: null,
     messageId: null,
-    pendingInterludesByTaskId: new Map(),
   };
 }
 
@@ -153,6 +153,7 @@ class StreamBufferManager {
       buf.messageId ||
       buf.textAcc ||
       buf.thinkingAcc ||
+      buf.hasThinkingBlock ||
       buf.moodAcc ||
       buf.inThinking ||
       buf.inMood ||
@@ -169,6 +170,7 @@ class StreamBufferManager {
     }
     buf.textAcc = '';
     buf.thinkingAcc = '';
+    buf.hasThinkingBlock = false;
     buf.moodAcc = '';
     buf.inThinking = false;
     buf.inMood = false;
@@ -194,7 +196,7 @@ class StreamBufferManager {
     const session = sessionScopedValue(store, store.chatSessions, buf.sessionPath);
     if (!session) return; // session 未初始化（loadMessages 尚未完成）
 
-    const targetId = buf.messageId || trailingDeferredTextRebindTargetId(session.items);
+    const targetId = buf.messageId;
     const existing = targetId
       ? session.items.find((item) =>
         item.type === 'message' &&
@@ -225,42 +227,10 @@ class StreamBufferManager {
     bumpMessageLiveVersion(buf.sessionPath);
   }
 
-  private tryInsertInterlude(buf: Buffer, block: InterludeContentBlock): boolean {
-    const consumed = useStore.getState().insertInterludeItemNearTaskResult(buf.sessionPath, block.taskId || null, block);
+  private appendInterlude(buf: Buffer, block: InterludeContentBlock): boolean {
+    const consumed = useStore.getState().appendInterludeItem(buf.sessionPath, block);
     if (consumed) bumpMessageLiveVersion(buf.sessionPath);
     return consumed;
-  }
-
-  private queuePendingInterlude(buf: Buffer, block: InterludeContentBlock): void {
-    const taskId = block.taskId;
-    if (!taskId) return;
-    const existing = buf.pendingInterludesByTaskId.get(taskId) || [];
-    const alreadyQueued = existing.some((item) => (
-      (block.id && item.id === block.id) ||
-      (!!block.taskId && item.taskId === block.taskId && item.status === block.status)
-    ));
-    if (alreadyQueued) return;
-    buf.pendingInterludesByTaskId.set(taskId, [...existing, block]);
-  }
-
-  private drainPendingInterludesForTask(buf: Buffer, taskId: string | null): void {
-    if (!taskId) return;
-    const pending = buf.pendingInterludesByTaskId.get(taskId);
-    if (!pending?.length) return;
-
-    const remaining: InterludeContentBlock[] = [];
-    for (const block of pending) {
-      if (!this.tryInsertInterlude(buf, block)) remaining.push(block);
-    }
-    if (remaining.length > 0) {
-      buf.pendingInterludesByTaskId.set(taskId, remaining);
-    } else {
-      buf.pendingInterludesByTaskId.delete(taskId);
-    }
-  }
-
-  private drainPendingInterludesForBlock(buf: Buffer, block: ContentBlock): void {
-    this.drainPendingInterludesForTask(buf, interludeAnchorTaskId(block));
   }
 
   /** 调度节流 flush */
@@ -288,7 +258,7 @@ class StreamBufferManager {
       const blocks = [...(msg.blocks || [])];
 
       // ── Thinking ──
-      if (buf.thinkingAcc || buf.inThinking) {
+      if (buf.thinkingAcc || buf.hasThinkingBlock || buf.inThinking) {
         const idx = blocks.findIndex(b => b.type === 'thinking');
         const thinkingBlock: ContentBlock = {
           type: 'thinking',
@@ -352,17 +322,20 @@ class StreamBufferManager {
       case 'thinking_start':
         this.ensureMessage(buf);
         buf.inThinking = true;
+        buf.hasThinkingBlock = true;
         buf.thinkingAcc = '';
         this.flush(buf);
         break;
 
       case 'thinking_delta':
+        buf.hasThinkingBlock = true;
         buf.thinkingAcc += msg.delta || '';
         // 与 text/mood 共用时间节流，避免思考流只能在结束后显示。
         this.scheduleFlush(buf);
         break;
 
       case 'thinking_end':
+        buf.hasThinkingBlock = true;
         buf.inThinking = false;
         this.flush(buf);
         break;
@@ -488,8 +461,7 @@ class StreamBufferManager {
 
         if (isInterludeBlock(block)) {
           if (this.hasTurnState(buf)) this.flush(buf);
-          if (this.tryInsertInterlude(buf, block)) break;
-          this.queuePendingInterlude(buf, block);
+          this.appendInterlude(buf, block);
           break;
         }
 
@@ -498,7 +470,6 @@ class StreamBufferManager {
           if (this.hasTurnState(buf)) this.flush(buf);
           const consumed = useStore.getState().resolveBlockByTaskId(buf.sessionPath, taskId, block);
           if (consumed) {
-            this.drainPendingInterludesForBlock(buf, block);
             bumpMessageLiveVersion(buf.sessionPath);
             break;
           }
@@ -510,7 +481,6 @@ class StreamBufferManager {
           ...m,
           blocks: mergeContentBlock([...(m.blocks || [])], block),
         }));
-        this.drainPendingInterludesForBlock(buf, block);
         break;
       }
 
@@ -569,7 +539,7 @@ class StreamBufferManager {
   snapshot(sessionPath: string, sessionId: string | null = null): StreamBufferSnapshot | null {
     const buf = this.lookupBuffer(sessionPath, sessionId);
     if (!buf) return null;
-    const hasContent = !!(buf.textAcc || buf.thinkingAcc || buf.moodAcc);
+    const hasContent = !!(buf.textAcc || buf.thinkingAcc || buf.hasThinkingBlock || buf.moodAcc);
     if (!hasContent) return null;
     return {
       hasContent: true,
@@ -611,13 +581,6 @@ function replacementTaskId(block: ContentBlock): string | null {
   return null;
 }
 
-function interludeAnchorTaskId(block: ContentBlock): string | null {
-  if (block.type === 'file') return block.replacesTaskId || null;
-  if (block.type === 'media_generation') return block.taskId || null;
-  if (block.type === 'subagent' || block.type === 'workflow') return block.taskId || null;
-  return null;
-}
-
 function isResolvedTaskBlock(block: ContentBlock, taskId: string): boolean {
   if (block.type === 'file') return block.replacesTaskId === taskId;
   return block.type === 'media_generation' &&
@@ -627,34 +590,6 @@ function isResolvedTaskBlock(block: ContentBlock, taskId: string): boolean {
 
 function isInterludeBlock(block: ContentBlock): block is Extract<ContentBlock, { type: 'interlude' }> {
   return block.type === 'interlude';
-}
-
-function trailingDeferredTextRebindTargetId(items: ChatListItem[]): string | null {
-  const taskIds = new Set<string>();
-  let idx = items.length - 1;
-
-  while (idx >= 0 && items[idx]?.type === 'interlude') {
-    const item = items[idx];
-    if (item.type === 'interlude' && item.data.taskId) {
-      taskIds.add(item.data.taskId);
-    }
-    idx -= 1;
-  }
-
-  if (taskIds.size === 0) return null;
-
-  const candidate = items[idx];
-  if (!candidate || candidate.type !== 'message' || candidate.data.role !== 'assistant') {
-    return null;
-  }
-
-  const hasDeferredTextAnchor = (candidate.data.blocks || []).some((block) => (
-    (block.type === 'workflow' || block.type === 'subagent') &&
-    !!block.taskId &&
-    taskIds.has(block.taskId)
-  ));
-
-  return hasDeferredTextAnchor ? candidate.data.id : null;
 }
 
 

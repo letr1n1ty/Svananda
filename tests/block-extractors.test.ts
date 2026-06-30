@@ -180,9 +180,9 @@ describe('present_files', () => {
 
 // ─── image-gen media generation ─────────────────────────────────────────────
 
-describe('image-gen media generation', () => {
+describe('media generation blocks', () => {
   it('extracts one pending media_generation block per submitted image task', () => {
-    const blocks = (extractBlocks as any)('image-gen_generate-image', {
+    const blocks = (extractBlocks as any)('media_generate-image', {
       mediaGeneration: {
         kind: 'image',
         batchId: 'batch-1',
@@ -212,6 +212,25 @@ describe('image-gen media generation', () => {
         status: 'pending',
       },
     ]);
+  });
+
+  it('keeps historical image-gen tool names readable for old sessions', () => {
+    const blocks = (extractBlocks as any)('image-gen_generate-image', {
+      mediaGeneration: {
+        kind: 'image',
+        batchId: 'legacy-batch',
+        prompt: 'A legacy generated image',
+        tasks: [{ taskId: 'legacy-task' }],
+      },
+    });
+
+    expect(blocks[0]).toMatchObject({
+      type: 'media_generation',
+      taskId: 'legacy-task',
+      kind: 'image',
+      batchId: 'legacy-batch',
+      status: 'pending',
+    });
   });
 
   it('replaces historical pending media_generation blocks with completed session file blocks', () => {
@@ -914,6 +933,27 @@ describe('extractBlocks: plugin card extraction', () => {
     expect(blocks[0].card.type).toBe('native');
   });
 
+  it('allows declarative chat surface cards without iframe routes', () => {
+    const details = {
+      card: {
+        pluginId: 'tavern',
+        type: 'chat.surface',
+        sessionRef: { sessionId: 'sess_tavern_private' },
+        title: 'Tavern run',
+      },
+    };
+    const blocks = (extractBlocks as any)('unknown_tool', details);
+    expect(blocks[0]).toEqual({
+      type: 'plugin_card',
+      card: {
+        pluginId: 'tavern',
+        type: 'chat.surface',
+        sessionRef: { sessionId: 'sess_tavern_private' },
+        title: 'Tavern run',
+      },
+    });
+  });
+
   it('strips legacy file payload fields from plugin cards', () => {
     const details = {
       card: {
@@ -970,5 +1010,61 @@ describe('extractBlocks: tool block + plugin card coexistence', () => {
     expect(blocks).toHaveLength(2);
     expect(blocks[0].type).toBe('skill');
     expect(blocks[1].type).toBe('plugin_card');
+  });
+});
+
+// ─── show_card ──────────────────────────────────────────────────────────────
+
+describe('show_card', () => {
+  const extractor = BLOCK_EXTRACTORS.show_card;
+
+  it('extracts interactive_card block from details', () => {
+    const details = {
+      cardId: 'c_abc123',
+      title: 'revenue_chart',
+      code: '<div><h2>Revenue</h2></div>',
+    };
+    const result = extractor(details);
+    expect(result).toHaveLength(1);
+    expect(result[0]).toEqual({
+      type: 'interactive_card',
+      cardId: 'c_abc123',
+      title: 'revenue_chart',
+      code: '<div><h2>Revenue</h2></div>',
+    });
+  });
+
+  it('returns null when code is missing', () => {
+    expect(extractor({ cardId: 'c_1', title: 'test' })).toBeNull();
+    expect(extractor({})).toBeNull();
+  });
+
+  it('defaults cardId and title to empty string', () => {
+    const result = extractor({ code: '<p>hello</p>' });
+    expect(result[0].cardId).toBe('');
+    expect(result[0].title).toBe('');
+    expect(result[0].code).toBe('<p>hello</p>');
+  });
+
+  it('works through extractBlocks', () => {
+    const details = {
+      cardId: 'c_xyz',
+      title: 'test_card',
+      code: '<svg viewBox="0 0 100 100"></svg>',
+    };
+    const blocks = extractBlocks('show_card', details, undefined);
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0].type).toBe('interactive_card');
+    expect(blocks[0].code).toBe('<svg viewBox="0 0 100 100"></svg>');
+  });
+
+  it('preserves multi-line code verbatim', () => {
+    const code = `<style>
+h1 { color: var(--accent); }
+</style>
+<h1>Title</h1>
+<script>console.log("ok")</script>`;
+    const result = extractor({ cardId: 'c_1', title: 't', code });
+    expect(result[0].code).toBe(code);
   });
 });

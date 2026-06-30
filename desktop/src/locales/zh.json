@@ -280,8 +280,6 @@
     "compacting": "上下文压缩中",
     "visionAuxiliary": "辅助视觉",
     "fileExpired": "文件已过期",
-    "branchFromHere": "从这里分支",
-    "branchSwitched": "已切换到此分支",
     "fileActions": {
       "more": "更多文件操作",
       "revealInFinder": "打开文件夹",
@@ -312,7 +310,9 @@
       "fallbackAssistant": "助手消息"
     },
     "modelSwitching": "正在切换模型，请稍候",
-    "unknownCommand": "[未知命令] {text}"
+    "unknownCommand": "[未知命令] {text}",
+    "branchFromHere": "从这里分支",
+    "branchSwitched": "已切换到此分支"
   },
   "time": {
     "justNow": "刚刚",
@@ -455,9 +455,9 @@
   },
   "yuan": {
     "types": {
-      "hanako": {
+      "svananda": {
         "label": "均衡的助手",
-        "avatar": "Hanako.png"
+        "avatar": "Svananda.png"
       },
       "butter": {
         "label": "更富有感情",
@@ -943,6 +943,9 @@
       "modelPersonaTitle": "模型与人格",
       "modelPersonaDescription": "观察不同供应商在 Svananda 人格、心境和输出契约上的适配表现。",
       "memoryTitle": "缓存记忆",
+      "memorySectionDescription": "记忆系统的实验性能力。稳定后会迁移到它真正归属的记忆设置里。",
+      "toolsTitle": "Agent 工具",
+      "toolsSectionDescription": "控制 Agent 工具的底层文件访问链路。实验开启后仅新会话使用新链路。",
       "description": "前沿能力会先放在这里观察。稳定后会迁移到它真正归属的设置页。",
       "empty": "暂无可见实验功能",
       "owner": {
@@ -980,6 +983,10 @@
         "summaryTitle": "Rolling Summary Preview",
         "emptyPreview": "暂无观察结果",
         "clearObservation": "清除观察结果"
+      },
+      "editableMemory": {
+        "title": "可编辑记忆",
+        "description": "打开后，当下记忆中的 Facts 会拆成可编辑区域；Agent 继续从时间线读取只读摘要。"
       },
       "compaction": {
         "title": "压缩模式",
@@ -1022,10 +1029,22 @@
       "newWarmPaperMode": "纸本",
       "midnightContrast": "青夜·高对比",
       "midnightContrastMode": "清晰",
+      "coral": "珊瑚",
+      "coralMode": "春日和纸",
       "auto": "自动",
       "autoMode": "跟随系统",
       "font": "字体",
       "fontHint": "选择正文阅读使用的字体",
+      "readingLayout": "阅读布局",
+      "documentWidth": "文档宽度",
+      "documentWidthHint": "控制 Markdown 编辑和预览正文的最大宽度。",
+      "chatWidth": "聊天宽度",
+      "chatWidthHint": "控制聊天消息和输入框的最大宽度。",
+      "readingWidth": "阅读宽度",
+      "readingWidthHint": "同步控制 Markdown 编辑、预览和聊天正文的最大宽度。",
+      "readingWidthUnlimited": "不限制",
+      "bodyFontSizeOffset": "正文字号",
+      "bodyFontSizeOffsetHint": "以默认聊天正文大小为基准，按档位微调聊天字号。",
       "serifFont": "衬线字体",
       "serifFontHint": "使用衬线体显示正文内容",
       "paperTexture": "纸质纹理",
@@ -1189,6 +1208,9 @@
       "system": "系统",
       "hardwareAcceleration": "硬件加速",
       "hardwareAccelerationHint": "使用显卡渲染窗口内容。关闭后会在下次启动使用软件渲染，可用于恢复 Windows 显卡驱动导致的启动闪退。",
+      "sidebar": "侧边栏",
+      "sessionListSingleLine": "会话列表单行显示",
+      "sessionListSingleLineHint": "打开后，每条会话只占一行；鼠标悬停时右侧按钮出现，标题自动缩短并显示省略号。",
       "shortcuts": "快捷键",
       "voiceRecordingShortcut": "语音录制/发送",
       "voiceRecordingShortcutHint": "主聊天页面聚焦时，按一次开始录音，再按一次结束并发送。"
@@ -1197,6 +1219,9 @@
       "title": "编辑器",
       "markdownFont": "字体",
       "markdownFontHint": "默认跟随外观里的阅读字体，也可以单独指定。",
+      "markdownContentWidth": "正文宽度",
+      "markdownContentWidthHint": "控制 Markdown 编辑和预览正文的最大宽度。",
+      "markdownContentWidthUnlimited": "不限制",
       "markdownBodyFontSize": "正文字号",
       "markdownBodyFontSizeHint": "Markdown 编辑器正文默认使用 15px。",
       "markdownHeading1FontSize": "一级标题字号",
@@ -1760,6 +1785,15 @@
       "compiledEmpty": "还没有编译过记忆",
       "compiledClear": "清空",
       "compiledCleared": "编译记忆已清空",
+      "editableFactsLabel": "重要事实",
+      "saveFacts": "保存 Facts",
+      "factsSaved": "Facts 已保存",
+      "readonlyTimelineTitle": "时间线记忆",
+      "sections": {
+        "today": "今天",
+        "week": "本周早些时候",
+        "longterm": "长期情况"
+      },
       "health": {
         "healthy": "记忆整理正常",
         "degraded": "记忆整理有延迟",
@@ -2117,6 +2151,12 @@
       "feishuAppId": "App ID",
       "feishuAppSecret": "App Secret",
       "feishuHint": "从飞书开放平台获取；使用长连接接收事件，不需要本地回调 URL",
+      "dingtalk": "钉钉",
+      "dingtalkClientId": "Client ID / AppKey",
+      "dingtalkClientSecret": "Client Secret / AppSecret",
+      "dingtalkRobotCode": "Robot Code",
+      "dingtalkRestBaseUrl": "REST Base URL",
+      "dingtalkHint": "企业内部应用凭证用于 token/Stream；Robot Code 用于企业机器人发送；REST Base URL 默认 https://api.dingtalk.io/v1.0",
       "whatsapp": "WhatsApp",
       "qq": "QQ",
       "qqAppId": "App ID",
@@ -2145,6 +2185,7 @@
       "testFail": "测试失败",
       "noToken": "请先输入 Bot Token",
       "noCredentials": "请先填写 App ID 和 App Secret",
+      "noDingtalkCredentials": "请先填写 Client ID、Client Secret、Robot Code 和 REST Base URL",
       "globalSettings": "全局设置",
       "agentSettings": "角色",
       "permissionMode": "权限模式",
@@ -2185,6 +2226,14 @@
         "点击「添加事件」，添加 <code>im.message.receive_v1</code>（接收消息）",
         "重要：进入「版本管理与发布」，先创建并发布一个版本（长连接配置需要应用已发布才能保存）",
         "将 App ID 和 App Secret 粘贴到上方输入框，打开开关即可"
+      ],
+      "tutorialDtSteps": [
+        "前往 <code>open.dingtalk.com</code>，进入「开发者后台」",
+        "创建「企业内部应用」，在应用凭证中复制 <code>Client ID/AppKey</code> 和 <code>Client Secret/AppSecret</code>",
+        "添加「应用机器人」能力，复制机器人详情里的 <code>Robot Code</code>",
+        "确认应用已开通机器人收发消息所需权限，并发布到企业可用范围",
+        "REST Base URL 保持默认 <code>https://api.dingtalk.io/v1.0</code>，除非你明确要接入钉钉兼容网关",
+        "将 Client ID、Client Secret、Robot Code 和 REST Base URL 粘贴到上方输入框，测试通过后打开开关即可"
       ],
       "whatsappHint": "即将支持"
     },
@@ -2438,7 +2487,20 @@
     "cut": "剪切",
     "copy": "复制",
     "paste": "粘贴",
-    "selectAll": "全选"
+    "selectAll": "全选",
+    "undo": "撤销",
+    "redo": "重做",
+    "bold": "加粗",
+    "italic": "斜体",
+    "strikethrough": "删除线",
+    "inlineCode": "行内代码",
+    "heading1": "标题 1",
+    "heading2": "标题 2",
+    "heading3": "标题 3",
+    "blockquote": "引用",
+    "codeBlock": "代码块",
+    "horizontalRule": "分隔线",
+    "list": "列表"
   },
   "rightWorkspace": {
     "activity": {
@@ -3216,6 +3278,11 @@
     "mediaNoDisplayableFiles": "生成结果没有可显示文件"
   },
   "toolDef": {
+    "updateSettings": {
+      "memoryFacts": "记忆 Facts",
+      "memoryFactsDesc": "当前 Agent 的可编辑当下记忆 Facts。需要先打开「可编辑记忆」实验。",
+      "memoryFactsDisabled": "可编辑记忆实验尚未打开。"
+    },
     "generateImage": {
       "description": "根据文字描述生成图片。非阻塞：提交后立即返回，完成后自动显示。",
       "promptDesc": "图片描述（中英文均可）",

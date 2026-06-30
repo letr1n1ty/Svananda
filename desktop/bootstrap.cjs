@@ -164,12 +164,12 @@ try {
   }
 
   // 自動遷移舊版 (Hanako) 或同名正式版 (Svananda) 的設定檔到新版 (Svananda-dev)
-  const targetHomeValid = isValidConfigHome(hanakoHome);
-  if (!targetHomeValid) {
+  const targetHomeExists = fs.existsSync(hanakoHome);
+  if (!targetHomeExists) {
     const sameHomeProd = hanakoHome.replace(/-dev$/, "");
     const oldHomeDev = hanakoHome.replace(/svananda/g, "hanako");
     const oldHomeProd = oldHomeDev.replace(/-dev$/, "");
-
+ 
     let sourceHome = null;
     if (sameHomeProd !== hanakoHome && isValidConfigHome(sameHomeProd)) {
       sourceHome = sameHomeProd;
@@ -184,12 +184,9 @@ try {
     } else if (fs.existsSync(oldHomeProd)) {
       sourceHome = oldHomeProd;
     }
-
+ 
     if (sourceHome) {
       try {
-        if (fs.existsSync(hanakoHome)) {
-          fs.rmSync(hanakoHome, { recursive: true, force: true });
-        }
         fs.cpSync(sourceHome, hanakoHome, { recursive: true });
         console.log(`[bootstrap] Migrated home from ${sourceHome} to ${hanakoHome}`);
       } catch (err) {
@@ -197,23 +194,23 @@ try {
       }
     }
   }
-
+ 
   // 自動遷移偏好設定 userData
   try {
     const appData = app.getPath("appData");
     const suffix = path.basename(hanakoHome).replace(/^\./, "");
     const appName = suffix.charAt(0).toUpperCase() + suffix.slice(1);
     const targetUserData = path.join(appData, appName);
-
-    const targetUserDataValid = isValidUserData(targetUserData);
-    if (!targetUserDataValid) {
+ 
+    const targetUserDataExists = fs.existsSync(targetUserData);
+    if (!targetUserDataExists) {
       const sameUserDataProd = targetUserData.replace(/-dev$/, "");
       const oldAppNameDev = appName.replace(/Svananda/g, "Hanako");
       const oldAppNameProd = oldAppNameDev.replace(/-dev$/, "");
       
       const sourceUserDataDev = path.join(appData, oldAppNameDev);
       const sourceUserDataProd = path.join(appData, oldAppNameProd);
-
+ 
       let sourceUserData = null;
       if (sameUserDataProd !== targetUserData && isValidUserData(sameUserDataProd)) {
         sourceUserData = sameUserDataProd;
@@ -228,12 +225,9 @@ try {
       } else if (fs.existsSync(sourceUserDataProd)) {
         sourceUserData = sourceUserDataProd;
       }
-
+ 
       if (sourceUserData && sourceUserData !== targetUserData) {
         try {
-          if (fs.existsSync(targetUserData)) {
-            fs.rmSync(targetUserData, { recursive: true, force: true });
-          }
           fs.cpSync(sourceUserData, targetUserData, { recursive: true });
           console.log(`[bootstrap] Migrated userData from ${sourceUserData} to ${targetUserData}`);
         } catch (err) {

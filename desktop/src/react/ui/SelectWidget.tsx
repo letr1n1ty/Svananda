@@ -220,6 +220,9 @@ export function SelectWidget({
           data-direction={openDirection}
           data-align={align}
           role="listbox"
+          /* 同 ProviderModelList：阻止 wheel 冒泡到 document 的 RemoveScroll
+             shouldPrevent，讓 portal 到 body 的 popup 能正常捲動。 */
+          onWheel={(e) => e.stopPropagation()}
         >
           {renderItems()}
         </div>,

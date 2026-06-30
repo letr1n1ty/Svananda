@@ -70,18 +70,6 @@ import type { AudioWaveform } from '../stores/chat-types';
 
 const EMPTY_FILE_REFS: readonly import('../types/file-ref').FileRef[] = Object.freeze([]);
 
-// #1624：刷新完成瞬间 drift 已清空但 busy 态还在的兜底渲染数据（只用于 busy 分支）
-const EMPTY_CAPABILITY_DRIFT: import('../types').SessionCapabilityDrift = Object.freeze({
-  version: 1,
-  fingerprint: '',
-  frozenFingerprint: '',
-  addedToolNames: [],
-  removedToolNames: [],
-  invalidToolNames: [],
-  promptChanged: false,
-  hasDrift: false,
-});
-
 function chatVideoMimeTypeForName(name: string, fallback?: string): string {
   if (fallback?.startsWith('video/')) return fallback;
   const ext = name.toLowerCase().replace(/^.*\./, '');
@@ -341,6 +329,10 @@ function InputAreaInner({ surface }: Required<InputAreaProps>) {
   // #1624：当前 session 的工具能力漂移提示（服务端 restore 时算好，前端只消费）
   const capabilityDrift = useStore(s => s.currentSessionPath ? (sessionScopedValue(s, s.capabilityDriftBySession, s.currentSessionPath) ?? null) : null);
   const capabilityRefreshing = useStore(s => sessionScopedListIncludes(s, s.capabilityRefreshingSessions, s.currentSessionPath));
+  const compactingStatus = capabilityRefreshing || compacting;
+  const compactingStatusLabel = capabilityRefreshing
+    ? t('session.capabilityDrift.refreshing')
+    : t('chat.compacting');
   const currentModelInfo = sessionModelInfo || globalModelInfo;
   const availableThinkingLevels = useMemo(
     () => getModelThinkingLevels(currentModelInfo),
@@ -1371,7 +1363,12 @@ function InputAreaInner({ surface }: Required<InputAreaProps>) {
   const activeServerConnection = useStore(s => s.activeServerConnection);
   useEffect(() => {
     if (activeServerConnection && surface !== 'mobile') {
-      hanaFetch('/api/session-thinking-level')
+      const query = pendingNewSession
+        ? '?pendingNewSession=1'
+        : currentSessionPath
+          ? `?sessionPath=${encodeURIComponent(currentSessionPath)}`
+          : '';
+      hanaFetch(`/api/session-thinking-level${query}`)
         .then(r => r.json())
         .then(d => { if (d.thinkingLevel) setThinkingLevel(d.thinkingLevel as ThinkingLevel); })
         .catch((err: unknown) => console.warn('[InputArea] load thinking level failed', err));
@@ -1383,7 +1380,7 @@ function InputAreaInner({ surface }: Required<InputAreaProps>) {
     };
     window.addEventListener('hana-plan-mode', handler);
     return () => window.removeEventListener('hana-plan-mode', handler);
-  }, [activeServerConnection, setPermissionMode, setThinkingLevel, surface]);
+  }, [activeServerConnection, currentSessionPath, pendingNewSession, setPermissionMode, setThinkingLevel, surface]);
 
   // ── Handle slash selection (builtin vs skill) ──
   const handleSlashSelect = useCallback((item: SlashItem) => {
@@ -1954,8 +1951,8 @@ function InputAreaInner({ surface }: Required<InputAreaProps>) {
       <InputStatusBars
         slashBusy={slashBusy}
         slashBusyLabel={slashCommands.find(c => c.name === slashBusy)?.busyLabel || t('common.executing')}
-        compacting={compacting}
-        compactingLabel={t('chat.compacting')}
+        compacting={compactingStatus}
+        compactingLabel={compactingStatusLabel}
         screenshotBusy={screenshotBusy}
         screenshotLabel={t('common.screenshotInProgress')}
         screenshotPageLabel={screenshotProgress && screenshotProgress.totalPages > 0
@@ -1987,10 +1984,10 @@ function InputAreaInner({ surface }: Required<InputAreaProps>) {
         )}
       </div>
       <div className={styles['input-stack']}>
-        {(capabilityDrift || capabilityRefreshing) && !visibleSessionConfirmation && !deletedAgentReadOnly && currentSessionPath && (
+        {capabilityDrift && !capabilityRefreshing && !visibleSessionConfirmation && !deletedAgentReadOnly && currentSessionPath && (
           <CapabilityDriftNotice
             sessionPath={currentSessionPath}
-            drift={capabilityDrift ?? EMPTY_CAPABILITY_DRIFT}
+            drift={capabilityDrift}
           />
         )}
         {visibleSessionConfirmation && (

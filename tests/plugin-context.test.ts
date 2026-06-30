@@ -41,6 +41,283 @@ describe("createPluginContext", () => {
     expect(ctx.sensitiveCapabilities).toEqual(["filesystem.write"]);
   });
 
+  it("exposes a controlled app event emitter", () => {
+    const bus = { emit: vi.fn(), subscribe() {}, request() {}, hasHandler() {} };
+    const ctx = createPluginContext({
+      pluginId: "cover-plugin",
+      pluginDir: "/plugins/cover-plugin",
+      dataDir: "/plugin-data/cover-plugin",
+      bus,
+    } as any);
+
+    expect(ctx.appEvents.emit("models-changed", { agentId: "agent-1" })).toBe(true);
+    expect(ctx.appEvents.emit("bad", "payload")).toBe(false);
+    expect(bus.emit).toHaveBeenCalledOnce();
+    expect(bus.emit).toHaveBeenCalledWith({
+      type: "app_event",
+      event: {
+        type: "models-changed",
+        payload: { agentId: "agent-1" },
+        source: "plugin:cover-plugin",
+      },
+    }, null);
+  });
+
+  it("exposes ResourceEventBus-backed change emission to plugins", () => {
+    const emitResourceChanged = vi.fn();
+    const ctx = createPluginContext({
+      pluginId: "resource-plugin",
+      pluginDir: "/plugins/resource-plugin",
+      dataDir: "/plugin-data/resource-plugin",
+      bus: { emit() {}, subscribe() {}, request() {}, hasHandler() {} },
+      emitResourceChanged,
+    } as any);
+    const input = {
+      changeType: "modified",
+      resourceKey: "local_fs:/tmp/a.md",
+      resource: { kind: "local-file", provider: "local_fs", path: "/tmp/a.md" },
+      source: "agent_tool",
+    };
+
+    expect(ctx.resourceEvents.changed(input)).toBe(true);
+    expect(emitResourceChanged).toHaveBeenCalledWith(input);
+  });
+
+  it("exposes a ResourceIO-backed resource facade with explicit capability checks", async () => {
+    const resourceIO = {
+      stat: vi.fn(async () => ({
+        resourceKey: "local_fs:/workspace",
+        resource: { kind: "local-file", path: "/workspace" },
+        exists: true,
+        isDirectory: true,
+      })),
+      read: vi.fn(async () => ({
+        resourceKey: "local_fs:/workspace/note.md",
+        resource: { kind: "local-file", path: "/workspace/note.md" },
+        content: Buffer.from("hello"),
+      })),
+      list: vi.fn(async () => ({
+        resourceKey: "local_fs:/workspace",
+        resource: { kind: "local-file", path: "/workspace" },
+        items: [],
+      })),
+      search: vi.fn(async () => ({
+        resourceKey: "mount:docs:",
+        resource: { kind: "mount", mountId: "docs", path: "" },
+        matches: [],
+      })),
+      materialize: vi.fn(async () => ({
+        resourceKey: "session_file:sf_1",
+        resource: { kind: "session-file", fileId: "sf_1" },
+        filePath: "/tmp/session-file.md",
+      })),
+      resolveWatchTarget: vi.fn(() => ({
+        resourceKey: "mount:docs:",
+        resource: { kind: "mount", mountId: "docs", path: "" },
+        filePath: "/tmp/docs",
+      })),
+      write: vi.fn(async (ref, content, options) => ({
+        changeType: "modified",
+        resourceKey: "local_fs:/workspace/note.md",
+        resource: { kind: "local-file", path: "/workspace/note.md" },
+        content,
+        options,
+      })),
+      rename: vi.fn(async () => ({
+        oldResourceKey: "local_fs:/workspace/old.md",
+        newResourceKey: "local_fs:/workspace/new.md",
+      })),
+      trash: vi.fn(async () => ({
+        resourceKey: "local_fs:/workspace/new.md",
+        trashId: "trash_1",
+      })),
+    };
+    const resourceWatch = {
+      subscribe: vi.fn((input) => ({
+        subscriptionId: input.resource ? "sub-one" : "sub-many",
+        resourceKeys: input.resource
+          ? ["mount:docs:"]
+          : ["mount:docs:", "local_fs:/workspace"],
+      })),
+      unsubscribe: vi.fn(() => true),
+    };
+    const ctx = createPluginContext({
+      pluginId: "resource-plugin",
+      pluginDir: "/plugins/resource-plugin",
+      dataDir: "/plugin-data/resource-plugin",
+      bus: { emit() {}, subscribe() {}, request() {}, hasHandler() {} },
+      capabilities: ["resource.read", "resource.search", "resource.materialize", "resource.watch"],
+      resourceIO,
+      resourceWatch,
+      runtimeContext: {
+        userId: "user_1",
+        studioId: "studio_1",
+        connectionKind: "local",
+        credentialKind: "loopback_token",
+        sessionId: "sess_1",
+        sessionPath: "/sessions/current.jsonl",
+      },
+    } as any);
+
+    const expectedPluginContext = (reason: string) => expect.objectContaining({
+      source: "plugin",
+      reason,
+      sessionId: "sess_1",
+      sessionPath: "/sessions/current.jsonl",
+      principal: expect.objectContaining({
+        kind: "plugin",
+        pluginId: "resource-plugin",
+        userId: "user_1",
+        studioId: "studio_1",
+        sessionId: "sess_1",
+        sessionPath: "/sessions/current.jsonl",
+        connectionKind: "local",
+        credentialKind: "loopback_token",
+      }),
+    });
+
+    await ctx.resources.stat({ kind: "local-file", path: "/workspace" });
+    const readResult = await ctx.resources.read({ kind: "local-file", path: "/workspace/note.md" });
+    await ctx.resources.list({ kind: "local-file", path: "/workspace" });
+    await ctx.resources.search({ kind: "mount", mountId: "docs", path: "" }, { query: "note" });
+    await ctx.resources.materialize({ kind: "session-file", fileId: "sf_1" });
+    ctx.resources.resolveWatchTarget({ kind: "mount", mountId: "docs", path: "" });
+    const watchHandle = ctx.resources.watch(
+      { kind: "mount", mountId: "docs", path: "" },
+      { purpose: "preview" },
+    );
+    const subscribeHandle = ctx.resources.subscribe([
+      { kind: "mount", mountId: "docs", path: "" },
+      { kind: "local-file", path: "/workspace" },
+    ]);
+
+    expect(readResult.content.toString("utf-8")).toBe("hello");
+    expect(resourceIO.stat).toHaveBeenCalledWith(
+      { kind: "local-file", path: "/workspace" },
+      expectedPluginContext("plugin:resource-plugin:stat"),
+    );
+    expect(resourceIO.read).toHaveBeenCalledWith(
+      { kind: "local-file", path: "/workspace/note.md" },
+      expectedPluginContext("plugin:resource-plugin:read"),
+    );
+    expect(resourceIO.list).toHaveBeenCalledWith(
+      { kind: "local-file", path: "/workspace" },
+      expectedPluginContext("plugin:resource-plugin:list"),
+    );
+    expect(resourceIO.search).toHaveBeenCalledWith(
+      { kind: "mount", mountId: "docs", path: "" },
+      { query: "note" },
+      expectedPluginContext("plugin:resource-plugin:search"),
+    );
+    expect(resourceIO.materialize).toHaveBeenCalledWith(
+      { kind: "session-file", fileId: "sf_1" },
+      expectedPluginContext("plugin:resource-plugin:materialize"),
+    );
+    expect(resourceIO.resolveWatchTarget).toHaveBeenCalledWith(
+      { kind: "mount", mountId: "docs", path: "" },
+      expectedPluginContext("plugin:resource-plugin:watch"),
+    );
+    expect(resourceWatch.subscribe).toHaveBeenCalledWith({
+      resource: { kind: "mount", mountId: "docs", path: "" },
+      purpose: "preview",
+      sessionPath: "/sessions/current.jsonl",
+    });
+    expect(resourceWatch.subscribe).toHaveBeenCalledWith({
+      resources: [
+        { kind: "mount", mountId: "docs", path: "" },
+        { kind: "local-file", path: "/workspace" },
+      ],
+      purpose: "plugin:resource-plugin:subscribe",
+      sessionPath: "/sessions/current.jsonl",
+    });
+    expect(watchHandle).toMatchObject({
+      subscriptionId: "sub-one",
+      resourceKeys: ["mount:docs:"],
+    });
+    expect(watchHandle.unsubscribe()).toBe(true);
+    expect(watchHandle.unsubscribe()).toBe(false);
+    expect(subscribeHandle.close()).toBe(true);
+    expect(resourceWatch.unsubscribe).toHaveBeenCalledWith("sub-one");
+    expect(resourceWatch.unsubscribe).toHaveBeenCalledWith("sub-many");
+    await expect(ctx.resources.write({ kind: "local-file", path: "/workspace/note.md" }, "updated"))
+      .rejects.toMatchObject({
+        code: "PLUGIN_RESOURCE_CAPABILITY_NOT_DECLARED",
+        capability: "resource.write",
+      });
+    expect(resourceIO.write).not.toHaveBeenCalled();
+
+    const writeCtx = createPluginContext({
+      pluginId: "resource-plugin",
+      pluginDir: "/plugins/resource-plugin",
+      dataDir: "/plugin-data/resource-plugin",
+      bus: { emit() {}, subscribe() {}, request() {}, hasHandler() {} },
+      capabilities: ["resource.write"],
+      resourceIO,
+      runtimeContext: {
+        userId: "user_1",
+        studioId: "studio_1",
+        connectionKind: "local",
+        credentialKind: "loopback_token",
+        sessionId: "sess_1",
+        sessionPath: "/sessions/current.jsonl",
+      },
+    } as any);
+    await writeCtx.resources.rename(
+      { kind: "local-file", path: "/workspace/old.md" },
+      { kind: "local-file", path: "/workspace/new.md" },
+    );
+    await writeCtx.resources.trash(
+      { kind: "local-file", path: "/workspace/new.md" },
+      { namespace: "plugin-test" },
+    );
+    expect(() => writeCtx.resources.watch({ kind: "local-file", path: "/workspace/new.md" }))
+      .toThrow(/resource.watch/);
+    expect(resourceIO.rename).toHaveBeenCalledWith(
+      { kind: "local-file", path: "/workspace/old.md" },
+      { kind: "local-file", path: "/workspace/new.md" },
+      expect.objectContaining({
+        source: "plugin",
+        reason: "plugin:resource-plugin:rename",
+        sessionId: "sess_1",
+        sessionPath: "/sessions/current.jsonl",
+        principal: expect.objectContaining({
+          kind: "plugin",
+          pluginId: "resource-plugin",
+        }),
+      }),
+    );
+    expect(resourceIO.trash).toHaveBeenCalledWith(
+      { kind: "local-file", path: "/workspace/new.md" },
+      { namespace: "plugin-test" },
+      expect.objectContaining({
+        source: "plugin",
+        reason: "plugin:resource-plugin:trash",
+        sessionId: "sess_1",
+        sessionPath: "/sessions/current.jsonl",
+        principal: expect.objectContaining({
+          kind: "plugin",
+          pluginId: "resource-plugin",
+        }),
+      }),
+    );
+  });
+
+  it("rejects resource operations when ResourceIO was not injected", async () => {
+    const ctx = createPluginContext({
+      pluginId: "resource-plugin",
+      pluginDir: "/plugins/resource-plugin",
+      dataDir: "/plugin-data/resource-plugin",
+      bus: { emit() {}, subscribe() {}, request() {}, hasHandler() {} },
+      capabilities: ["resource.read"],
+    } as any);
+
+    await expect(ctx.resources.read({ kind: "local-file", path: "/workspace/note.md" }))
+      .rejects.toMatchObject({
+        code: "PLUGIN_RESOURCE_IO_UNAVAILABLE",
+        pluginId: "resource-plugin",
+      });
+  });
+
   it("exposes server runtime scope when provided", () => {
     const bus = { emit() {}, subscribe() {}, request() {}, hasHandler() {} };
     const ctx = createPluginContext({
@@ -381,7 +658,7 @@ describe("createPluginContext with accessLevel", () => {
       dataDir: "/tmp/data", bus, accessLevel: "restricted",
     } as any);
     expect(Object.isFrozen(ctx.bus)).toBe(true);
-    expect(() => { ctx.bus.handle = () => {}; }).toThrow();
+    expect(() => { (ctx.bus as any).handle = () => {}; }).toThrow();
   });
 
   it("defaults to restricted when accessLevel omitted", async () => {

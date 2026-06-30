@@ -9,9 +9,14 @@ import {
 } from "../../shared/compaction-mode.ts";
 
 export const CACHE_SNAPSHOT_EXPERIMENT_ID = "memory.cache_snapshot_reflection";
+export const EDITABLE_MEMORY_EXPERIMENT_ID = "memory.editable_facts";
 export const DEEPSEEK_ROLEPLAY_REASONING_PATCH_EXPERIMENT_ID = "provider.deepseek_roleplay_reasoning_patch";
 export const PROACTIVE_SUBAGENT_EXPERIMENT_ID = "subagent.proactive_delegation";
 export { COMPACTION_MODE_EXPERIMENT_ID };
+
+const RETIRED_EXPERIMENT_VALUES = new Map([
+  [CACHE_SNAPSHOT_EXPERIMENT_ID, "off"],
+]);
 
 const DEFINITIONS = [
   normalizeExperimentDefinition({
@@ -82,44 +87,34 @@ const DEFINITIONS = [
     },
   }),
   normalizeExperimentDefinition({
-    id: CACHE_SNAPSHOT_EXPERIMENT_ID,
-    titleKey: "settings.experiments.cacheSnapshot.title",
-    descriptionKey: "settings.experiments.cacheSnapshot.description",
+    id: EDITABLE_MEMORY_EXPERIMENT_ID,
+    titleKey: "settings.experiments.editableMemory.title",
+    descriptionKey: "settings.experiments.editableMemory.description",
     owner: "memory",
     scope: "global",
-    defaultValue: "off",
+    defaultValue: false,
     valueSchema: {
-      type: "enum",
+      type: "boolean",
       presentation: {
-        type: "paired_toggles",
-        mapping: {
-          mainOff: "off",
-          mainOnObserveOn: "shadow",
-          mainOnObserveOff: "write",
-        },
+        type: "toggle",
       },
-      options: [
-        { value: "off", labelKey: "settings.experiments.cacheSnapshot.off" },
-        { value: "shadow", labelKey: "settings.experiments.cacheSnapshot.shadow" },
-        { value: "write", labelKey: "settings.experiments.cacheSnapshot.write" },
-      ],
     },
-    status: "beta",
+    status: "alpha",
     risk: "medium",
-    restartPolicy: "new_session",
+    restartPolicy: "immediate",
     targetHome: {
       tab: "agent",
       section: "memory",
-      whenStable: "Move to Agent / Memory after cache hit and summary quality stabilize.",
+      whenStable: "Move to Agent / Memory after editable facts and incremental consolidation prove stable.",
     },
     exitCriteria: [
-      "Shadow previews match legacy memory quality for normal sessions.",
-      "Write mode records cache hit telemetry without hurting normal chat cache.",
-      "Fallbacks are visible in health and usage logs.",
+      "Editable facts remain stable across daily memory maintenance.",
+      "Turning the experiment off restores the legacy facts path without data migration.",
+      "User and agent edits rebuild memory.md without corrupting timeline sections.",
     ],
     sunsetPolicy: {
       removeWhenRetired: true,
-      migration: "Read old experiment value for one release after moving to Agent / Memory.",
+      migration: "Promote editable-facts.md to the canonical facts source once the experiment graduates.",
     },
   }),
   normalizeExperimentDefinition({
@@ -171,7 +166,14 @@ function requireDefinition(id) {
   return definition;
 }
 
+function requirePreferencesManager(preferencesManager) {
+  if (!preferencesManager || typeof preferencesManager.setExperimentValue !== "function") {
+    throw new Error("preferences manager is required");
+  }
+}
+
 export function getResolvedExperimentValue(preferencesManager, id) {
+  if (RETIRED_EXPERIMENT_VALUES.has(id)) return RETIRED_EXPERIMENT_VALUES.get(id);
   const definition = requireDefinition(id);
   const stored = preferencesManager?.getExperimentValue?.(id);
   if (stored === undefined) return definition.defaultValue;
@@ -183,13 +185,17 @@ export function getResolvedExperimentValue(preferencesManager, id) {
 }
 
 export function setExperimentValue(preferencesManager, id, value) {
+  if (RETIRED_EXPERIMENT_VALUES.has(id)) {
+    requirePreferencesManager(preferencesManager);
+    const retiredValue = RETIRED_EXPERIMENT_VALUES.get(id);
+    preferencesManager.setExperimentValue(id, retiredValue);
+    return retiredValue;
+  }
   const definition = requireDefinition(id);
   if (definition.scope !== "global") {
     throw new Error(`experiment ${id} requires ${definition.scope} scope`);
   }
-  if (!preferencesManager || typeof preferencesManager.setExperimentValue !== "function") {
-    throw new Error("preferences manager is required");
-  }
+  requirePreferencesManager(preferencesManager);
   const normalized = normalizeExperimentValue(definition, value);
   preferencesManager.setExperimentValue(id, normalized);
   return normalized;

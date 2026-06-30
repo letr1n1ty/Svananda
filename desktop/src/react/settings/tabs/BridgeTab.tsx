@@ -18,6 +18,7 @@ export function BridgeTab() {
   // 传 undefined 让 Toggle 走加载态。
   const tgInfo = b.status?.telegram;
   const fsInfo = b.status?.feishu;
+  const dtInfo = b.status?.dingtalk;
   const qqInfo = b.status?.qq;
   const wxInfo = b.status?.wechat;
   const permissionMode = (b.status?.permissionMode || snapshotBridge?.permissionMode) as BridgePermissionMode | undefined;
@@ -82,12 +83,12 @@ export function BridgeTab() {
 
       {/* 对外意识：hint 在上、textarea 在下，直接作为 section body children（单 textarea 不套 row） */}
       <SettingsSection title={t('settings.agent.publicIshiki')}>
-        <div style={{ padding: 'var(--space-sm) var(--space-md)' }}>
+        <div style={{ padding: 'var(--space-8) var(--space-16)' }}>
           <div style={{
             fontSize: '0.7rem',
             color: 'var(--text-muted)',
             lineHeight: 1.5,
-            marginBottom: 'var(--space-sm)',
+            marginBottom: 'var(--space-8)',
             whiteSpace: 'pre-line',
           }}>
             {t('settings.agent.publicIshikiHint')}
@@ -170,6 +171,51 @@ export function BridgeTab() {
         ownerUsers={b.status?.knownUsers?.feishu || []}
         currentOwner={b.status?.owner?.feishu}
         onOwnerChange={(userId) => b.setOwner('feishu', userId)}
+      />
+
+      {/* 钉钉 */}
+      <PlatformSection
+        platform="dingtalk"
+        title={t('settings.bridge.dingtalk')}
+        status={dtInfo}
+        credentialFields={[
+          { key: 'clientId', label: t('settings.bridge.dingtalkClientId'), type: 'text', value: b.dtClientId, onChange: b.setDtClientId },
+          { key: 'clientSecret', label: t('settings.bridge.dingtalkClientSecret'), type: 'secret', value: b.dtClientSecret, onChange: b.setDtClientSecret },
+          { key: 'robotCode', label: t('settings.bridge.dingtalkRobotCode'), type: 'text', value: b.dtRobotCode, onChange: b.setDtRobotCode },
+          { key: 'restBaseUrl', label: t('settings.bridge.dingtalkRestBaseUrl'), type: 'text', value: b.dtRestBaseUrl, onChange: b.setDtRestBaseUrl },
+        ]}
+        onToggle={async (on) => {
+          if (on && (!b.dtClientId.trim() || !b.dtClientSecret.trim() || !b.dtRobotCode.trim() || !b.dtRestBaseUrl.trim())) { b.showToast(t('settings.bridge.noDingtalkCredentials'), 'error'); return; }
+          await b.saveBridgeConfig('dingtalk', {
+            clientId: b.dtClientId.trim(),
+            clientSecret: b.dtClientSecret.trim(),
+            robotCode: b.dtRobotCode.trim(),
+            restBaseUrl: b.dtRestBaseUrl.trim(),
+          }, on);
+        }}
+        onTest={() => {
+          if (!b.dtClientId.trim() || !b.dtClientSecret.trim() || !b.dtRobotCode.trim() || !b.dtRestBaseUrl.trim()) { b.showToast(t('settings.bridge.noDingtalkCredentials'), 'error'); return; }
+          b.testPlatform('dingtalk', {
+            clientId: b.dtClientId.trim(),
+            clientSecret: b.dtClientSecret.trim(),
+            robotCode: b.dtRobotCode.trim(),
+            restBaseUrl: b.dtRestBaseUrl.trim(),
+          });
+        }}
+        onCredentialBlur={async () => {
+          if (b.dtClientId.trim() && b.dtClientSecret.trim() && b.dtRobotCode.trim() && b.dtRestBaseUrl.trim())
+            await b.saveBridgeConfig('dingtalk', {
+              clientId: b.dtClientId.trim(),
+              clientSecret: b.dtClientSecret.trim(),
+              robotCode: b.dtRobotCode.trim(),
+              restBaseUrl: b.dtRestBaseUrl.trim(),
+            }, undefined);
+        }}
+        testing={b.testingPlatform === 'dingtalk'}
+        hint={t('settings.bridge.dingtalkHint')}
+        ownerUsers={b.status?.knownUsers?.dingtalk || []}
+        currentOwner={b.status?.owner?.dingtalk}
+        onOwnerChange={(userId) => b.setOwner('dingtalk', userId)}
       />
 
       {/* QQ */}

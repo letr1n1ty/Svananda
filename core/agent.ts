@@ -35,7 +35,6 @@ import {
   createSubagentReplyTool,
   createSubagentTool,
 } from "../lib/tools/subagent-tool.ts";
-import { writeSubagentSessionMeta } from "../lib/subagent-executor-metadata.ts";
 import { createCheckDeferredTool } from "../lib/tools/check-deferred-tool.ts";
 import { createStopTaskTool } from "../lib/tools/stop-task-tool.ts";
 import { createCurrentStatusTool } from "../lib/tools/current-status-tool.ts";
@@ -43,6 +42,8 @@ import { createTerminalTool } from "../lib/tools/terminal-tool.ts";
 import { createWorkflowTool } from "../lib/tools/workflow-tool.ts";
 import { loadSvanandaPersona } from "./agent-svananda-persona.ts";
 import { buildSvanandaConsolidatedMemory } from "./agent-svananda-memory.ts";
+import { createCardGuideTool } from "../lib/tools/card-guide-tool.ts";
+import { createShowCardTool } from "../lib/tools/show-card-tool.ts";
 import { runCompatChecks } from "../lib/compat/index.ts";
 import { getPlatformPromptNote } from "./platform-prompt.ts";
 import { assertAgentConfigPatchYuan, getAgentConfigRepairState } from "./yuan-registry.ts";
@@ -54,6 +55,7 @@ import { callText } from "./llm-client.ts";
 import { createModuleLogger } from "../lib/debug-log.ts";
 import {
   CACHE_SNAPSHOT_EXPERIMENT_ID,
+  EDITABLE_MEMORY_EXPERIMENT_ID,
   PROACTIVE_SUBAGENT_EXPERIMENT_ID,
   getResolvedExperimentValue,
 } from "../lib/experiments/registry.ts";
@@ -141,6 +143,8 @@ export class Agent {
   declare _utilityModel: any;
   declare _webFetchTool: any;
   declare _webSearchTool: any;
+  declare _cardGuideTool: any;
+  declare _showCardTool: any;
   declare _workflowTool: any;
   declare agentDir: any;
   declare agentName: any;
@@ -232,6 +236,8 @@ export class Agent {
     this._subagentTool = null;
     this._subagentReplyTool = null;
     this._subagentCloseTool = null;
+    this._cardGuideTool = null;
+    this._showCardTool = null;
     this._workflowTool = null;
     this._currentStatusTool = null;
     this._terminalTool = null;
@@ -396,8 +402,18 @@ export class Agent {
           this._cb?.getPreferences?.(),
           CACHE_SNAPSHOT_EXPERIMENT_ID,
         ),
+        getEditableMemoryEnabled: () => getResolvedExperimentValue(
+          this._cb?.getPreferences?.(),
+          EDITABLE_MEMORY_EXPERIMENT_ID,
+        ) === true,
         buildSessionCacheSnapshot: (sessionPath, options) => (
           this._cb?.getEngine?.()?.buildSessionCacheSnapshot?.(sessionPath, options)
+        ),
+        readMemoryReflectionSnapshot: (sessionPath) => (
+          this._cb?.getEngine?.()?.getSessionMemoryReflectionSnapshot?.(sessionPath)
+        ),
+        ensureSessionLoaded: (sessionPath) => (
+          this._cb?.getEngine?.()?.ensureSessionLoaded?.(sessionPath)
         ),
         getSessionStreamFn: (sessionPath) => (
           this._cb?.getEngine?.()?.getSessionStreamFn?.(sessionPath)
@@ -472,6 +488,10 @@ export class Agent {
     this._fileTool = createFileTool({
       getCwd: () => this._cb?.getCwd?.() || this.agentDir,
       getSessionPath: () => this._cb?.getCurrentSessionPath?.(),
+      getAuthorizedFolders: (sessionPath) => {
+        const effectiveSessionPath = sessionPath || this._cb?.getCurrentSessionPath?.();
+        return this._cb?.getEngine?.()?.getSessionAuthorizedFolders?.(effectiveSessionPath) || [];
+      },
       resolveSessionFile: (fileId, options = {}) => this._cb?.getEngine?.()?.getSessionFile?.(fileId, options) || null,
       registerSessionFile: (entry) => this._cb?.registerSessionFile?.(entry),
     });
@@ -487,7 +507,7 @@ export class Agent {
       registerSessionFile: (entry) => this._cb?.registerSessionFile?.(entry),
     });
     this._notifyTool = createNotifyTool({
-      onNotify: (payload) => this._notifyHandler?.(payload),
+      onNotify: (payload, context) => this._notifyHandler?.(payload, context),
     });
     this._stopTaskTool = createStopTaskTool({
       getTaskRegistry: () => this._cb?.getTaskRegistry?.(),
@@ -605,7 +625,13 @@ export class Agent {
       currentAgentId: this.channelsDir && this.agentsDir ? this.id : undefined,
       agentDir: this.agentDir,
       emitEvent: (event, sp) => this._cb?.emitEvent?.(event, sp),
-      persistSubagentSessionMeta: (sessionPath, meta) => writeSubagentSessionMeta(sessionPath, meta),
+      persistSubagentSessionMeta: (sessionPath, meta) => (
+        this._cb?.getEngine?.()?.setSessionExecutorMetadata?.(
+          sessionPath,
+          meta,
+          { source: "subagent_runtime" },
+        )
+      ),
       proactiveDelegation: getResolvedExperimentValue(
         this._cb?.getPreferences?.(),
         PROACTIVE_SUBAGENT_EXPERIMENT_ID,
@@ -622,6 +648,7 @@ export class Agent {
         return this._cb.executeIsolated(prompt, opts);
       },
       getSessionPath: () => this._cb?.getCurrentSessionPath?.(),
+      getSessionPermissionMode: (sp) => this._cb?.getSessionPermissionMode?.(sp) ?? null,
       getParentCwd: () => this._cb?.getCwd?.() || null,
       getAgentId: () => this.id,
       emitEvent: (event, sp) => this._cb?.emitEvent?.(event, sp),
@@ -640,7 +667,13 @@ export class Agent {
       getUsageLedger: () => this._cb?.getEngine?.()?.usageLedger,
       // journal 断点续跑：存储在 agent 数据目录下。
       getJournalDir: () => path.join(this.agentDir, "workflow-journals"),
+      // workflow node session 是审计证据，不能落到 executeIsolated 默认 .ephemeral 后被删掉。
+      getWorkflowSessionDir: () => path.join(this.agentDir, "workflow-sessions"),
     });
+
+    // 14. Interactive Card 工具（设计手册 + 渲染工具）
+    this._cardGuideTool = createCardGuideTool();
+    this._showCardTool = createShowCardTool();
 
     // 12. 组装 system prompt（按 master 构建，与 per-session 开关解耦）
     log(`  [agent] 9. buildSystemPrompt...`);
@@ -856,6 +889,8 @@ export class Agent {
       this._checkDeferredTool,
       this._currentStatusTool,
       this._terminalTool,
+      this._cardGuideTool,
+      this._showCardTool,
     ].filter(Boolean);
   }
   get tools() {
@@ -919,9 +954,11 @@ export class Agent {
   /** 查询指定 session 的持久化记忆开关，缺省视为开启 */
   isSessionMemoryEnabledFor(sessionPath) {
     if (!sessionPath) return this._memorySessionEnabled;
-    const metaPath = path.join(this.sessionDir, "session-meta.json");
-    const meta = safeReadJSON(metaPath, {});
-    return meta[path.basename(sessionPath)]?.memoryEnabled !== false;
+    const engine = this._cb?.getEngine?.();
+    if (typeof engine?.getSessionMemoryEnabled === "function") {
+      return engine.getSessionMemoryEnabled(sessionPath) !== false;
+    }
+    return this._memorySessionEnabled;
   }
 
   /** 设置 agent 级别记忆总开关（同时重载 config 以获取 disabledSince/reenableAt） */
@@ -1235,24 +1272,24 @@ export class Agent {
       ? "\n## Session 文件与交付\n\n" +
         "SessionFile 表示和当前 session 相关的本地文件：用户上传、你用 write/edit 产生的、插件产物、浏览器截图、安装产物，都会进入同一套 session 文件记录。\n\n" +
         "当用户本轮附加文件时，消息里可能出现 [SessionFile] JSON 上下文。这里的 fileId 是机器契约，label 只是展示名；读取时优先用 read 的 fileId 参数，不要从 label 或可见文本重建真实路径。\n\n" +
-        "当你需要使用本轮会话已经产生或登记过的文件时，先调用 current_status 获取 session_files。它会返回当前 session 的文件清单、fileId、来源、状态和本机路径。不要猜测 session-files 缓存路径。\n\n" +
+        "当你需要使用本轮会话已经产生或登记过的文件时，先调用 current_status 获取 session_files。它会返回当前 session 的文件清单、fileId/sessionFileRef、来源、状态和本机路径；对 write/edit 产物还会返回 writableLocalRef。不要猜测 session-files 缓存路径。\n\n" +
         "当你需要查看文件元信息或把已有 SessionFile 复制到当前项目目录时，使用 file 工具。查看用 action=stat；复制用 action=copy，并优先传 fileId；它会把原文件复制到当前 cwd 内的目标路径并重新登记为 external SessionFile。不要移动、编辑或删除原 SessionFile。\n\n" +
         "当用户要求安装 skill package 时，使用 install_skill。GitHub 仓库用 github_url；当前 Hana server 可见的本机路径用 local_path 或 source={ type: 'path', path }；已经上传或登记为 SessionFile 的 .zip/.skill 包用 fileId 或 source={ type: 'session_file', fileId }。不要把手机/PWA 客户端路径当成 server 路径。\n\n" +
-        "write/edit 成功后会由工具层自动记录为 session 相关文件，让它出现在 Session File 列表里；这条登记不等同于交付给用户。\n\n" +
-        "write/edit 生成或修改文件后，主动调用 stage_files 交付这次变更。优先使用 write/edit 结果里的 SessionFile fileId；只有结果里没有 fileId 且文件还没有 SessionFile 记录时，才传真实存在的本机绝对路径。stage 表示把这个 session 相关文件提升为消费端可展示/可发送的文件。\n\n" +
-        "- 已有 SessionFile 时优先传 fileId；只有还没有 SessionFile 记录的本机文件才传真实存在的本机绝对路径\n" +
+        "write/edit 成功后会由工具层自动记录为 session 相关文件，让它出现在 Session File 列表里；工具结果里的 sessionFileRef 是读取/交付身份，writableLocalRef 是继续修改时使用的本机路径。这条登记不等同于交付给用户。\n\n" +
+        "write/edit 生成或修改文件后，主动调用 stage_files 交付这次变更。stage_files 优先使用 write/edit 结果里的 sessionFileRef.fileId；只有结果里没有 fileId 且文件还没有 SessionFile 记录时，才传真实存在的本机绝对路径。后续继续 write/edit 时不要传 fileId，使用 writableLocalRef.path 或普通本机路径。stage 表示把这个 session 相关文件提升为消费端可展示/可发送的文件。\n\n" +
+        "- 读取、stat、copy、stage 可用 fileId；write/edit 必须用 writableLocalRef.path 或普通本机路径\n" +
         "- 同一个未变化的文件不要反复 stage；文件内容后来再次变化时，再 stage 最新版本\n" +
         "- 不要只在文本里写文件路径\n" +
         "- 不要在 Agent 层判断具体平台怎么展示或发送，消费端会处理"
       : "\n## Session Files and Delivery\n\n" +
         "SessionFile means a local file related to the current session: files uploaded by the user, files you produce with write/edit, plugin outputs, browser screenshots, and install outputs all enter the same session file record.\n\n" +
         "When the user attaches files in the current turn, the message may include [SessionFile] JSON context. fileId is the machine contract and label is display-only; prefer the read tool's fileId argument instead of reconstructing a real path from label or visible text.\n\n" +
-        "When you need to use a file that has already been produced or registered in this conversation, call current_status with the session_files key first. It returns the current session file list, fileId, origin, status, and local path. Do not guess session-files cache paths.\n\n" +
+        "When you need to use a file that has already been produced or registered in this conversation, call current_status with the session_files key first. It returns the current session file list, fileId/sessionFileRef, origin, status, and local path; for write/edit outputs it also returns writableLocalRef. Do not guess session-files cache paths.\n\n" +
         "When you need to inspect file metadata or copy an existing SessionFile into the current project folder, use the file tool. Use action=stat for metadata; use action=copy and prefer passing fileId for copies. This copies the original into the current cwd target and registers the copy as an external SessionFile. Do not move, edit, or delete the original SessionFile.\n\n" +
         "When the user asks you to install a skill package, use install_skill. Use github_url for GitHub repos; use local_path or source={ type: 'path', path } for paths visible to the current Hana server; use fileId or source={ type: 'session_file', fileId } for uploaded or registered .zip/.skill packages. Do not treat a phone/PWA client path as a server path.\n\n" +
-        "After write/edit succeeds, the tool layer records the file as session-related automatically so it appears in Session File; that registration does not mean the file has been delivered to the user.\n\n" +
-        "After write/edit creates or modifies a file, call stage_files for that changed file. Prefer the SessionFile fileId returned by the write/edit result; pass a real local absolute path only when the result has no fileId and the file has no SessionFile record yet. Staging promotes this session-related file to something consumers can display/send.\n\n" +
-        "- Prefer fileId for existing SessionFiles; pass real local absolute paths only for local files that do not have a SessionFile record yet\n" +
+        "After write/edit succeeds, the tool layer records the file as session-related automatically so it appears in Session File; sessionFileRef in the tool result is the read/delivery identity, and writableLocalRef is the local path to use for later modifications. That registration does not mean the file has been delivered to the user.\n\n" +
+        "After write/edit creates or modifies a file, call stage_files for that changed file. Prefer sessionFileRef.fileId from the write/edit result for stage_files; pass a real local absolute path only when the result has no fileId and the file has no SessionFile record yet. For later write/edit calls, do not pass fileId; use writableLocalRef.path or an ordinary local path. Staging promotes this session-related file to something consumers can display/send.\n\n" +
+        "- read, stat, copy, and stage may use fileId; write/edit must use writableLocalRef.path or an ordinary local path\n" +
         "- Do not repeatedly stage the same unchanged file; if the file is modified again, stage the latest version again\n" +
         "- Do not merely write file paths in text\n" +
         "- Do not decide platform-specific display or sending behavior in the Agent layer; consumers handle it"
@@ -1292,18 +1329,18 @@ export class Agent {
       );
     }
 
-    if (this._isComputerUseAvailableForThisAgent()) {
-      parts.push(isZh
-        ? "\n## 本机应用控制\n\n" +
-          "用户要求打开、查看、点击、输入或控制本机 GUI 应用时，优先使用 computer 工具。" +
-          "不要用 bash、AppleScript、osascript、open -a 或平台脚本控制 GUI 应用；这些路径会绕过 Hana 的应用审批列表，也更容易撞到系统隐私权限。" +
-          "如果需要控制一个新应用，先用 computer 的 start/list_apps 流程触发应用级确认，让用户在输入框上方同意。"
-        : "\n## Desktop App Control\n\n" +
-          "When the user asks to open, inspect, click, type in, or control a local GUI application, prefer the computer tool. " +
-          "Do not use bash, AppleScript, osascript, open -a, or platform scripts to control GUI applications; those paths bypass Hana's app approval list and are more likely to hit OS privacy permissions. " +
-          "For a new app, use the computer start/list_apps flow so the input-area app approval prompt can ask the user to approve it."
-      );
-    }
+	    if (this._isComputerUseAvailableForThisAgent()) {
+	      parts.push(isZh
+	        ? "\n## 本机应用控制\n\n" +
+	          "用户要求打开、查看、点击、输入或控制本机 GUI 应用时，优先使用 computer 工具。" +
+	          "不要用 bash、AppleScript、osascript、open -a 或平台脚本控制 GUI 应用；这些路径会绕过 Hana 的应用审批列表，也更容易撞到系统隐私权限。" +
+	          "如果需要控制一个新应用，先用 computer 的 start/list_apps 流程；Auto 模式会交给自动 reviewer，Ask 模式才会向用户展示应用确认。"
+	        : "\n## Desktop App Control\n\n" +
+	          "When the user asks to open, inspect, click, type in, or control a local GUI application, prefer the computer tool. " +
+	          "Do not use bash, AppleScript, osascript, open -a, or platform scripts to control GUI applications; those paths bypass Hana's app approval list and are more likely to hit OS privacy permissions. " +
+	          "For a new app, use the computer start/list_apps flow; Auto mode routes approval to the automatic reviewer, while Ask mode can show the user an app confirmation."
+	      );
+	    }
 
     // 失败处理（诊断优先于换方案）
     parts.push(isZh
