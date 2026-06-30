@@ -271,7 +271,7 @@ export interface TodoItem {
 }
 
 // ── 浮动面板类型 ──
-export type ActivePanel = 'activity' | 'automation' | 'bridge' | 'skills' | null;
+export type ActivePanel = 'activity' | 'automation' | 'bridge' | 'skills' | 'ultrawork' | null;
 export type TabType = 'chat' | 'channels' | `plugin:${string}`;
 export type RightWorkspaceTab = 'session-files' | 'workspace' | `plugin-widget:${string}`;
 
@@ -474,3 +474,49 @@ export interface PlatformApi {
 
   [key: string]: unknown;
 }
+
+export interface UltraworkWorkPacket {
+  id: string;
+  title: string;
+  kind: string;
+  status: string;
+  agent: string;
+  objective?: string;
+  deliverables?: string[];
+  confirmationGates?: string[];
+}
+
+export interface UltraworkArtifact {
+  id: string;
+  kind: string;
+  title: string;
+  agent?: string;
+  exportedFile?: {
+    fileId?: string | null;
+    filePath?: string | null;
+  } | null;
+  createdAt?: string;
+}
+
+export interface UltraworkRunSummary {
+  id: string;
+  goal: string;
+  mode: string;
+  intent: string;
+  status: string;
+  sessionPath?: string | null;
+  workPackets?: UltraworkWorkPacket[];
+  artifacts?: UltraworkArtifact[];
+  updatedAt?: string;
+  createdAt?: string;
+}
+
+export interface UltraworkCapabilities {
+  modes?: string[];
+  actions?: string[];
+  workPacketKinds?: string[];
+  packetRunners?: Array<{ kind: string; name: string | null }>;
+  artifactExport?: boolean;
+  textGeneration?: boolean;
+}
+
